@@ -250,6 +250,55 @@ func (s *Service) AdminList(ctx context.Context, limit, offset int) ([]*user.Use
 	return s.repo.List(ctx, limit, offset)
 }
 
+// AdminCreate 管理员创建用户
+func (s *Service) AdminCreate(ctx context.Context, input *user.AdminCreateInput) (*user.User, error) {
+	// 验证手机号
+	if !isValidPhone(input.Phone) {
+		return nil, ErrInvalidPhone
+	}
+
+	// 验证密码
+	if len(input.Password) < 6 {
+		return nil, ErrInvalidPassword
+	}
+
+	// 检查手机号是否已存在
+	exists, err := s.repo.ExistsByPhone(ctx, input.Phone)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, ErrPhoneAlreadyExists
+	}
+
+	// 密码加密
+	passwordHash, err := hashPassword(input.Password)
+	if err != nil {
+		return nil, err
+	}
+
+	// 创建用户
+	now := time.Now()
+	u := &user.User{
+		ID:           uuid.New(),
+		Phone:        input.Phone,
+		PasswordHash: passwordHash,
+		Nickname:     input.Nickname,
+		IsActive:     true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := s.repo.Create(ctx, u); err != nil {
+		if errors.Is(err, userRepo.ErrAlreadyExists) {
+			return nil, ErrPhoneAlreadyExists
+		}
+		return nil, err
+	}
+
+	return u, nil
+}
+
 // AdminUpdate 管理员更新用户（可更新任意字段）
 func (s *Service) AdminUpdate(ctx context.Context, userID uuid.UUID, input *user.AdminUpdateInput) (*user.User, error) {
 	u, err := s.repo.GetByID(ctx, userID)

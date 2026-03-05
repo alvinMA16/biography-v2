@@ -85,6 +85,29 @@ func NewHandler(
 
 // --- 用户管理 ---
 
+// CreateUser 创建用户
+func (h *Handler) CreateUser(c *gin.Context) {
+	var input user.AdminCreateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	u, err := h.userService.AdminCreate(c.Request.Context(), &input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, userService.ErrInvalidPhone) ||
+			errors.Is(err, userService.ErrInvalidPassword) ||
+			errors.Is(err, userService.ErrPhoneAlreadyExists) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, u)
+}
+
 // ListUsers 获取用户列表
 func (h *Handler) ListUsers(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))

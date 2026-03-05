@@ -147,6 +147,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	{
 		// 用户管理
 		adminRoutes.GET("/users", adminHandler.ListUsers)
+		adminRoutes.POST("/users", adminHandler.CreateUser)
 		adminRoutes.GET("/users/:id", adminHandler.GetUser)
 		adminRoutes.GET("/users/:id/stats", adminHandler.GetUserStats)
 		adminRoutes.PUT("/users/:id", adminHandler.UpdateUser)
