@@ -89,12 +89,17 @@ func NewHandler(
 func (h *Handler) CreateUser(c *gin.Context) {
 	var input user.AdminCreateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fmt.Printf("[CreateUser] JSON bind error: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON绑定失败: " + err.Error()})
 		return
 	}
 
+	fmt.Printf("[CreateUser] Input: phone=%s, nickname=%v, gender=%v, birth_year=%v\n",
+		input.Phone, input.Nickname, input.Gender, input.BirthYear)
+
 	u, err := h.userService.AdminCreate(c.Request.Context(), &input)
 	if err != nil {
+		fmt.Printf("[CreateUser] Service error: %v\n", err)
 		status := http.StatusInternalServerError
 		if errors.Is(err, userService.ErrInvalidPhone) ||
 			errors.Is(err, userService.ErrInvalidPassword) ||
@@ -105,6 +110,7 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		return
 	}
 
+	fmt.Printf("[CreateUser] Success: user_id=%s\n", u.ID)
 	c.JSON(http.StatusCreated, u)
 }
 
