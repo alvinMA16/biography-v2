@@ -88,8 +88,18 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		userRoutes.GET("/topics", userHandler.GetTopicOptions)
 	}
 
+	// 创建 Realtime Handler
+	realtimeHandler := realtime.NewHandler(
+		deps.Config.JWTSecret,
+		deps.UserService,
+		deps.TopicService,
+		deps.ASRProvider,
+		deps.LLMManager,
+		deps.TTSProvider,
+	)
+
 	// WebSocket 实时对话（需要 JWT 认证，通过 query param）
-	api.GET("/realtime/dialog", realtime.HandleDialog)
+	api.GET("/realtime/dialog", realtimeHandler.HandleDialog)
 
 	// 创建 Admin Handler
 	adminHandler := admin.NewHandler(
