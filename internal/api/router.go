@@ -9,15 +9,19 @@ import (
 	"github.com/peizhengma/biography-v2/internal/api/realtime"
 	"github.com/peizhengma/biography-v2/internal/api/user"
 	"github.com/peizhengma/biography-v2/internal/config"
+	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
+	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
 // RouterDeps 路由依赖
 type RouterDeps struct {
-	Config     *config.Config
-	DB         *postgres.DB
-	LLMManager *llm.Manager
+	Config      *config.Config
+	DB          *postgres.DB
+	LLMManager  *llm.Manager
+	ASRProvider asr.Provider
+	TTSProvider tts.Provider
 }
 
 // NewRouter 创建路由
@@ -75,7 +79,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	api.GET("/realtime/dialog", realtime.HandleDialog)
 
 	// 创建 Admin Handler
-	adminHandler := admin.NewHandler(deps.LLMManager)
+	adminHandler := admin.NewHandler(deps.LLMManager, deps.ASRProvider, deps.TTSProvider)
 
 	// 管理端路由（需要 Admin API Key）
 	adminRoutes := api.Group("/admin")
@@ -113,6 +117,10 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		adminRoutes.GET("/llm/providers", adminHandler.GetLLMProviders)
 		adminRoutes.PUT("/llm/providers/primary", adminHandler.SetLLMProvider)
 		adminRoutes.POST("/llm/providers/:provider/test", adminHandler.TestLLMProvider)
+
+		// TTS Provider 管理
+		adminRoutes.GET("/tts/voices", adminHandler.GetTTSVoices)
+		adminRoutes.POST("/tts/test", adminHandler.TestTTS)
 
 		// 系统监控
 		adminRoutes.GET("/monitor/health", adminHandler.HealthCheck)

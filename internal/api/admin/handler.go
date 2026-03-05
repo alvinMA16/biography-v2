@@ -6,21 +6,25 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
+	"github.com/peizhengma/biography-v2/internal/provider/tts"
 )
 
 // Handler Admin API 处理器
 type Handler struct {
-	llmManager *llm.Manager
-	// asrProvider asr.Provider
-	// ttsProvider tts.Provider
+	llmManager  *llm.Manager
+	asrProvider asr.Provider
+	ttsProvider tts.Provider
 	// db          *postgres.DB
 }
 
 // NewHandler 创建 Admin Handler
-func NewHandler(llmManager *llm.Manager) *Handler {
+func NewHandler(llmManager *llm.Manager, asrProvider asr.Provider, ttsProvider tts.Provider) *Handler {
 	return &Handler{
-		llmManager: llmManager,
+		llmManager:  llmManager,
+		asrProvider: asrProvider,
+		ttsProvider: ttsProvider,
 	}
 }
 
@@ -187,18 +191,52 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 		}
 	}
 
-	// TODO: 检查 ASR Provider
-	response.Providers["asr"] = ProviderStatus{
-		Name:   "aliyun",
-		Status: "unavailable",
-		Error:  "not configured",
+	// 检查 ASR Provider
+	if h.asrProvider != nil {
+		start := time.Now()
+		err := h.asrProvider.HealthCheck(ctx)
+		latency := time.Since(start).Milliseconds()
+		status := ProviderStatus{
+			Name:    h.asrProvider.Name(),
+			Status:  "ok",
+			Latency: latency,
+		}
+		if err != nil {
+			status.Status = "error"
+			status.Error = err.Error()
+			response.Status = "degraded"
+		}
+		response.Providers["asr"] = status
+	} else {
+		response.Providers["asr"] = ProviderStatus{
+			Name:   "aliyun",
+			Status: "unavailable",
+			Error:  "not configured",
+		}
 	}
 
-	// TODO: 检查 TTS Provider
-	response.Providers["tts"] = ProviderStatus{
-		Name:   "doubao",
-		Status: "unavailable",
-		Error:  "not configured",
+	// 检查 TTS Provider
+	if h.ttsProvider != nil {
+		start := time.Now()
+		err := h.ttsProvider.HealthCheck(ctx)
+		latency := time.Since(start).Milliseconds()
+		status := ProviderStatus{
+			Name:    h.ttsProvider.Name(),
+			Status:  "ok",
+			Latency: latency,
+		}
+		if err != nil {
+			status.Status = "error"
+			status.Error = err.Error()
+			response.Status = "degraded"
+		}
+		response.Providers["tts"] = status
+	} else {
+		response.Providers["tts"] = ProviderStatus{
+			Name:   "doubao",
+			Status: "unavailable",
+			Error:  "not configured",
+		}
 	}
 
 	// TODO: 检查数据库
@@ -329,4 +367,73 @@ func (h *Handler) TestLLMProvider(c *gin.Context) {
 func (h *Handler) GetStats(c *gin.Context) {
 	// TODO: 实现统计数据
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+}
+
+// GetTTSVoices 获取 TTS 音色列表
+func (h *Handler) GetTTSVoices(c *gin.Context) {
+	if h.ttsProvider == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "TTS provider not configured"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	voices, err := h.ttsProvider.ListVoices(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"provider": h.ttsProvider.Name(),
+		"voices":   voices,
+	})
+}
+
+// TestTTS 测试 TTS 合成
+func (h *Handler) TestTTS(c *gin.Context) {
+	if h.ttsProvider == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "TTS provider not configured"})
+		return
+	}
+
+	var req struct {
+		Text       string `json:"text" binding:"required"`
+		Voice      string `json:"voice"`
+		Format     string `json:"format"`
+		SampleRate int    `json:"sample_rate"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	config := tts.SynthesisConfig{
+		Voice:      req.Voice,
+		Format:     req.Format,
+		SampleRate: req.SampleRate,
+	}
+
+	start := time.Now()
+	audio, err := h.ttsProvider.Synthesize(ctx, req.Text, config)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      err.Error(),
+			"latency_ms": latency,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"provider":    h.ttsProvider.Name(),
+		"audio_bytes": len(audio),
+		"latency_ms":  latency,
+	})
 }

@@ -11,9 +11,13 @@ import (
 
 	"github.com/peizhengma/biography-v2/internal/api"
 	"github.com/peizhengma/biography-v2/internal/config"
+	"github.com/peizhengma/biography-v2/internal/provider/asr"
+	"github.com/peizhengma/biography-v2/internal/provider/asr/aliyun"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/llm/dashscope"
 	"github.com/peizhengma/biography-v2/internal/provider/llm/gemini"
+	"github.com/peizhengma/biography-v2/internal/provider/tts"
+	"github.com/peizhengma/biography-v2/internal/provider/tts/doubao"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
@@ -31,14 +35,18 @@ func main() {
 	}
 	defer db.Close()
 
-	// 初始化 LLM Manager
+	// 初始化 Providers
 	llmManager := initLLMProviders(cfg)
+	asrProvider := initASRProvider(cfg)
+	ttsProvider := initTTSProvider(cfg)
 
 	// 初始化路由
 	router := api.NewRouter(&api.RouterDeps{
-		Config:     cfg,
-		DB:         db,
-		LLMManager: llmManager,
+		Config:      cfg,
+		DB:          db,
+		LLMManager:  llmManager,
+		ASRProvider: asrProvider,
+		TTSProvider: ttsProvider,
 	})
 
 	// 创建 HTTP 服务器
@@ -54,6 +62,12 @@ func main() {
 	go func() {
 		log.Printf("Server starting on port %s", cfg.Port)
 		log.Printf("LLM providers: %v (primary: %s)", llmManager.Available(), cfg.LLMProviderDefault)
+		if asrProvider != nil {
+			log.Printf("ASR provider: %s", asrProvider.Name())
+		}
+		if ttsProvider != nil {
+			log.Printf("TTS provider: %s", ttsProvider.Name())
+		}
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
@@ -119,4 +133,47 @@ func initLLMProviders(cfg *config.Config) *llm.Manager {
 	}
 
 	return manager
+}
+
+// initASRProvider 初始化 ASR 提供者
+func initASRProvider(cfg *config.Config) asr.Provider {
+	if cfg.AliyunAccessKeyID == "" || cfg.AliyunAccessKeySecret == "" || cfg.AliyunASRAppKey == "" {
+		log.Println("Warning: Aliyun ASR not configured")
+		return nil
+	}
+
+	provider, err := aliyun.New(asr.ProviderConfig{
+		AccessKeyID:     cfg.AliyunAccessKeyID,
+		AccessKeySecret: cfg.AliyunAccessKeySecret,
+		AppKey:          cfg.AliyunASRAppKey,
+		Region:          "cn-shanghai",
+	})
+	if err != nil {
+		log.Printf("Warning: Failed to initialize Aliyun ASR provider: %v", err)
+		return nil
+	}
+
+	log.Println("Aliyun ASR provider initialized")
+	return provider
+}
+
+// initTTSProvider 初始化 TTS 提供者
+func initTTSProvider(cfg *config.Config) tts.Provider {
+	if cfg.DoubaoAppID == "" || cfg.DoubaoAccessKey == "" {
+		log.Println("Warning: Doubao TTS not configured")
+		return nil
+	}
+
+	provider, err := doubao.New(tts.ProviderConfig{
+		AppID:     cfg.DoubaoAppID,
+		AccessKey: cfg.DoubaoAccessKey,
+		Speakers:  cfg.DoubaoSpeakers,
+	})
+	if err != nil {
+		log.Printf("Warning: Failed to initialize Doubao TTS provider: %v", err)
+		return nil
+	}
+
+	log.Println("Doubao TTS provider initialized")
+	return provider
 }
