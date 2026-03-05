@@ -3,6 +3,9 @@ FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
+# Use Aliyun mirror for faster downloads in China
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
 # Install dependencies
 RUN apk add --no-cache git
 
@@ -20,6 +23,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/server ./cmd/server
 FROM alpine:3.19
 
 WORKDIR /app
+
+# Use Aliyun mirror for faster downloads in China
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 # Install ca-certificates for HTTPS requests
 RUN apk --no-cache add ca-certificates tzdata curl
