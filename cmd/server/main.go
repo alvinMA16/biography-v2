@@ -18,6 +18,8 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/llm/gemini"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	"github.com/peizhengma/biography-v2/internal/provider/tts/doubao"
+	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
+	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
@@ -40,6 +42,13 @@ func main() {
 	asrProvider := initASRProvider(cfg)
 	ttsProvider := initTTSProvider(cfg)
 
+	// 初始化 Repository 和 Service
+	userRepository := userRepo.New(db.Pool())
+	userSvc := userService.New(userRepository, userService.Config{
+		JWTSecret:     cfg.JWTSecret,
+		JWTExpireDays: cfg.JWTExpireDays,
+	})
+
 	// 初始化路由
 	router := api.NewRouter(&api.RouterDeps{
 		Config:      cfg,
@@ -47,6 +56,7 @@ func main() {
 		LLMManager:  llmManager,
 		ASRProvider: asrProvider,
 		TTSProvider: ttsProvider,
+		UserService: userSvc,
 	})
 
 	// 创建 HTTP 服务器

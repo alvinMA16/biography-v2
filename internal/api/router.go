@@ -12,6 +12,7 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
+	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
@@ -22,6 +23,7 @@ type RouterDeps struct {
 	LLMManager  *llm.Manager
 	ASRProvider asr.Provider
 	TTSProvider tts.Provider
+	UserService *userService.Service
 }
 
 // NewRouter 创建路由
@@ -45,34 +47,37 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		})
 	})
 
+	// 创建 User Handler
+	userHandler := user.NewHandler(deps.UserService)
+
 	// API 路由组
 	api := r.Group("/api")
 
 	// 公开路由
-	api.POST("/auth/register", user.Register)
-	api.POST("/auth/login", user.Login)
+	api.POST("/auth/register", userHandler.Register)
+	api.POST("/auth/login", userHandler.Login)
 
 	// 用户端路由（需要 JWT 认证）
 	userRoutes := api.Group("")
 	userRoutes.Use(middleware.JWTAuth(deps.Config.JWTSecret))
 	{
 		// 用户信息
-		userRoutes.GET("/user/profile", user.GetProfile)
-		userRoutes.PUT("/user/profile", user.UpdateProfile)
-		userRoutes.PUT("/user/password", user.ChangePassword)
+		userRoutes.GET("/user/profile", userHandler.GetProfile)
+		userRoutes.PUT("/user/profile", userHandler.UpdateProfile)
+		userRoutes.PUT("/user/password", userHandler.ChangePassword)
 
 		// 对话
-		userRoutes.GET("/conversations", user.ListConversations)
-		userRoutes.POST("/conversations", user.CreateConversation)
-		userRoutes.GET("/conversations/:id", user.GetConversation)
-		userRoutes.GET("/conversations/:id/messages", user.GetMessages)
+		userRoutes.GET("/conversations", userHandler.ListConversations)
+		userRoutes.POST("/conversations", userHandler.CreateConversation)
+		userRoutes.GET("/conversations/:id", userHandler.GetConversation)
+		userRoutes.GET("/conversations/:id/messages", userHandler.GetMessages)
 
 		// 回忆录
-		userRoutes.GET("/memoirs", user.ListMemoirs)
-		userRoutes.GET("/memoirs/:id", user.GetMemoir)
+		userRoutes.GET("/memoirs", userHandler.ListMemoirs)
+		userRoutes.GET("/memoirs/:id", userHandler.GetMemoir)
 
 		// 话题
-		userRoutes.GET("/topics", user.GetTopicOptions)
+		userRoutes.GET("/topics", userHandler.GetTopicOptions)
 	}
 
 	// WebSocket 实时对话（需要 JWT 认证，通过 query param）
