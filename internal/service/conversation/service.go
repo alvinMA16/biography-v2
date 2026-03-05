@@ -222,6 +222,33 @@ func (s *Service) Delete(ctx context.Context, id, userID uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
 }
 
+// ============================================
+// Admin 方法
+// ============================================
+
+// AdminList 获取对话列表（管理员，可跨用户）
+func (s *Service) AdminList(ctx context.Context, userID *uuid.UUID, status *conversation.Status, limit, offset int) ([]*conversation.Conversation, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return s.repo.ListAll(ctx, userID, status, limit, offset)
+}
+
+// AdminGetWithMessages 管理员获取对话详情（不检查权限）
+func (s *Service) AdminGetWithMessages(ctx context.Context, id uuid.UUID) (*conversation.Conversation, error) {
+	c, err := s.repo.GetByIDWithMessages(ctx, id)
+	if err != nil {
+		if errors.Is(err, convRepo.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return c, nil
+}
+
 // nilIfEmpty 空字符串转 nil
 func nilIfEmpty(s string) *string {
 	if s == "" {

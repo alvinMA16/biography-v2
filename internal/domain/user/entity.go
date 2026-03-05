@@ -69,3 +69,14 @@ type AuthResponse struct {
 	Token string `json:"token"`
 	User  *User  `json:"user"`
 }
+
+// AdminUpdateInput 管理员更新用户输入
+type AdminUpdateInput struct {
+	Nickname         *string `json:"nickname"`
+	PreferredName    *string `json:"preferred_name"`
+	Gender           *string `json:"gender"`
+	BirthYear        *int    `json:"birth_year"`
+	Hometown         *string `json:"hometown"`
+	MainCity         *string `json:"main_city"`
+	ProfileCompleted *bool   `json:"profile_completed"`
+}

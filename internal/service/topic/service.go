@@ -237,6 +237,89 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
+// ============================================
+// Admin 方法
+// ============================================
+
+// AdminList 获取话题列表（管理员，可跨用户）
+func (s *Service) AdminList(ctx context.Context, userID *uuid.UUID, status *topic.Status, limit, offset int) ([]*topic.TopicCandidate, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return s.repo.ListAll(ctx, userID, status, limit, offset)
+}
+
+// AdminCreate 管理员创建话题（可为任意用户创建）
+func (s *Service) AdminCreate(ctx context.Context, userID uuid.UUID, input *topic.CreateTopicInput) (*topic.TopicCandidate, error) {
+	source := input.Source
+	if source == "" {
+		source = topic.SourceManual
+	}
+
+	status := topic.StatusApproved
+	if input.Status != nil {
+		status = *input.Status
+	}
+
+	now := time.Now()
+	t := &topic.TopicCandidate{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Title:     input.Title,
+		Greeting:  nilIfEmpty(input.Greeting),
+		Context:   nilIfEmpty(input.Context),
+		Status:    status,
+		Source:    source,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.repo.Create(ctx, t); err != nil {
+		return nil, err
+	}
+
+	return t, nil
+}
+
+// AdminUpdate 管理员更新话题（不检查权限）
+func (s *Service) AdminUpdate(ctx context.Context, id uuid.UUID, input *topic.UpdateTopicInput) (*topic.TopicCandidate, error) {
+	t, err := s.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.Title != nil {
+		t.Title = *input.Title
+	}
+	if input.Greeting != nil {
+		t.Greeting = input.Greeting
+	}
+	if input.Context != nil {
+		t.Context = input.Context
+	}
+	if input.Status != nil {
+		t.Status = *input.Status
+	}
+
+	if err := s.repo.Update(ctx, t); err != nil {
+		return nil, err
+	}
+
+	return t, nil
+}
+
+// AdminDelete 管理员删除话题（不检查权限）
+func (s *Service) AdminDelete(ctx context.Context, id uuid.UUID) error {
+	_, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return s.repo.Delete(ctx, id)
+}
+
 // deref 安全解引用
 func deref(s *string) string {
 	if s == nil {

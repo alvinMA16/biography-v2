@@ -90,7 +90,15 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	api.GET("/realtime/dialog", realtime.HandleDialog)
 
 	// 创建 Admin Handler
-	adminHandler := admin.NewHandler(deps.LLMManager, deps.ASRProvider, deps.TTSProvider)
+	adminHandler := admin.NewHandler(
+		deps.LLMManager,
+		deps.ASRProvider,
+		deps.TTSProvider,
+		deps.UserService,
+		deps.ConversationService,
+		deps.MemoirService,
+		deps.TopicService,
+	)
 
 	// 管理端路由（需要 Admin API Key）
 	adminRoutes := api.Group("/admin")

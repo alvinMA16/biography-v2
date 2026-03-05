@@ -337,3 +337,68 @@ func (r *Repository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 	_, err := r.pool.Exec(ctx, query, userID)
 	return err
 }
+
+// ListAll 获取所有话题（管理端使用）
+func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *topic.Status, limit, offset int) ([]*topic.TopicCandidate, int, error) {
+	whereClause := "WHERE 1=1"
+	args := []interface{}{}
+	argIndex := 1
+
+	if userID != nil {
+		whereClause += fmt.Sprintf(" AND user_id = $%d", argIndex)
+		args = append(args, *userID)
+		argIndex++
+	}
+
+	if status != nil {
+		whereClause += fmt.Sprintf(" AND status = $%d", argIndex)
+		args = append(args, *status)
+		argIndex++
+	}
+
+	// 获取总数
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM topic_candidates %s", whereClause)
+	var total int
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// 获取列表
+	query := fmt.Sprintf(`
+		SELECT id, user_id, title, greeting, context, status, source, created_at, updated_at
+		FROM topic_candidates
+		%s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argIndex, argIndex+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var topics []*topic.TopicCandidate
+	for rows.Next() {
+		var t topic.TopicCandidate
+		err := rows.Scan(
+			&t.ID,
+			&t.UserID,
+			&t.Title,
+			&t.Greeting,
+			&t.Context,
+			&t.Status,
+			&t.Source,
+			&t.CreatedAt,
+			&t.UpdatedAt,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		topics = append(topics, &t)
+	}
+
+	return topics, total, nil
+}

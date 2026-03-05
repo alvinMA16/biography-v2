@@ -220,6 +220,74 @@ func (r *Repository) List(ctx context.Context, filter conversation.ListConversat
 	return conversations, total, nil
 }
 
+// ListAll 获取所有对话（管理端使用）
+func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *conversation.Status, limit, offset int) ([]*conversation.Conversation, int, error) {
+	whereClause := "WHERE 1=1"
+	args := []interface{}{}
+	argIndex := 1
+
+	if userID != nil {
+		whereClause += fmt.Sprintf(" AND user_id = $%d", argIndex)
+		args = append(args, *userID)
+		argIndex++
+	}
+
+	if status != nil {
+		whereClause += fmt.Sprintf(" AND status = $%d", argIndex)
+		args = append(args, *status)
+		argIndex++
+	}
+
+	// 获取总数
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM conversations %s", whereClause)
+	var total int
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// 获取列表
+	query := fmt.Sprintf(`
+		SELECT c.id, c.user_id, c.topic, c.greeting, c.context, c.summary, c.status,
+		       c.created_at, c.updated_at,
+		       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
+		FROM conversations c
+		%s
+		ORDER BY c.created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argIndex, argIndex+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var conversations []*conversation.Conversation
+	for rows.Next() {
+		var c conversation.Conversation
+		err := rows.Scan(
+			&c.ID,
+			&c.UserID,
+			&c.Topic,
+			&c.Greeting,
+			&c.Context,
+			&c.Summary,
+			&c.Status,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&c.MessageCount,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		conversations = append(conversations, &c)
+	}
+
+	return conversations, total, nil
+}
+
 // GetActiveByUserID 获取用户的活跃对话
 func (r *Repository) GetActiveByUserID(ctx context.Context, userID uuid.UUID) (*conversation.Conversation, error) {
 	query := `

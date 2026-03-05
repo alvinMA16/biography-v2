@@ -225,6 +225,74 @@ func (s *Service) GetByID(ctx context.Context, userID uuid.UUID) (*user.User, er
 	return s.GetProfile(ctx, userID)
 }
 
+// ============================================
+// Admin 方法
+// ============================================
+
+// AdminList 获取用户列表（管理员）
+func (s *Service) AdminList(ctx context.Context, limit, offset int) ([]*user.User, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return s.repo.List(ctx, limit, offset)
+}
+
+// AdminUpdate 管理员更新用户（可更新任意字段）
+func (s *Service) AdminUpdate(ctx context.Context, userID uuid.UUID, input *user.AdminUpdateInput) (*user.User, error) {
+	u, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, userRepo.ErrNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+
+	if input.Nickname != nil {
+		u.Nickname = input.Nickname
+	}
+	if input.PreferredName != nil {
+		u.PreferredName = input.PreferredName
+	}
+	if input.Gender != nil {
+		u.Gender = input.Gender
+	}
+	if input.BirthYear != nil {
+		u.BirthYear = input.BirthYear
+	}
+	if input.Hometown != nil {
+		u.Hometown = input.Hometown
+	}
+	if input.MainCity != nil {
+		u.MainCity = input.MainCity
+	}
+	if input.ProfileCompleted != nil {
+		u.ProfileCompleted = *input.ProfileCompleted
+	}
+
+	u.ProfileCompleted = isProfileCompleted(u)
+
+	if err := s.repo.Update(ctx, u); err != nil {
+		return nil, err
+	}
+
+	return u, nil
+}
+
+// AdminDelete 管理员删除用户（软删除）
+func (s *Service) AdminDelete(ctx context.Context, userID uuid.UUID) error {
+	_, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, userRepo.ErrNotFound) {
+			return ErrUserNotFound
+		}
+		return err
+	}
+	return s.repo.SoftDelete(ctx, userID)
+}
+
 // generateToken 生成 JWT Token
 func (s *Service) generateToken(userID uuid.UUID) (string, error) {
 	claims := jwt.MapClaims{

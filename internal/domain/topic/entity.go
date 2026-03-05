@@ -53,10 +53,11 @@ type TopicOption struct {
 
 // CreateTopicInput 创建话题输入
 type CreateTopicInput struct {
-	Title    string `json:"title" binding:"required"`
-	Greeting string `json:"greeting"`
-	Context  string `json:"context"`
-	Source   Source `json:"source"`
+	Title    string  `json:"title" binding:"required"`
+	Greeting string  `json:"greeting"`
+	Context  string  `json:"context"`
+	Source   Source  `json:"source"`
+	Status   *Status `json:"status"` // 管理员可指定初始状态
 }
 
 // UpdateTopicInput 更新话题输入

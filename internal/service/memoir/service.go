@@ -214,6 +214,68 @@ func (s *Service) GetMemoirTitles(ctx context.Context, userID uuid.UUID) ([]stri
 	return titles, nil
 }
 
+// ============================================
+// Admin 方法
+// ============================================
+
+// AdminList 获取回忆录列表（管理员，可跨用户）
+func (s *Service) AdminList(ctx context.Context, limit, offset int, includeDeleted bool) ([]*memoir.Memoir, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return s.repo.ListAll(ctx, limit, offset, includeDeleted)
+}
+
+// AdminGetByID 管理员获取回忆录（不检查权限）
+func (s *Service) AdminGetByID(ctx context.Context, id uuid.UUID) (*memoir.Memoir, error) {
+	return s.GetByID(ctx, id)
+}
+
+// AdminUpdate 管理员更新回忆录（不检查权限）
+func (s *Service) AdminUpdate(ctx context.Context, id uuid.UUID, input *memoir.UpdateMemoirInput) (*memoir.Memoir, error) {
+	m, err := s.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.Title != nil {
+		m.Title = *input.Title
+	}
+	if input.Content != nil {
+		m.Content = *input.Content
+	}
+	if input.TimePeriod != nil {
+		m.TimePeriod = input.TimePeriod
+	}
+	if input.StartYear != nil {
+		m.StartYear = input.StartYear
+	}
+	if input.EndYear != nil {
+		m.EndYear = input.EndYear
+	}
+	if input.SortOrder != nil {
+		m.SortOrder = *input.SortOrder
+	}
+
+	if err := s.repo.Update(ctx, m); err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+// AdminDelete 管理员删除回忆录（软删除，不检查权限）
+func (s *Service) AdminDelete(ctx context.Context, id uuid.UUID) error {
+	_, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return s.repo.SoftDelete(ctx, id)
+}
+
 // nilIfEmpty 空字符串转 nil
 func nilIfEmpty(s string) *string {
 	if s == "" {
