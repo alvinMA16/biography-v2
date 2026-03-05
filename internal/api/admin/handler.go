@@ -3,20 +3,25 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/peizhengma/biography-v2/internal/domain/memoir"
+	"github.com/peizhengma/biography-v2/internal/domain/quote"
 	"github.com/peizhengma/biography-v2/internal/domain/topic"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 )
@@ -30,6 +35,8 @@ type Handler struct {
 	convService   *convService.Service
 	memoirService *memoirService.Service
 	topicService  *topicService.Service
+	quoteService  *quoteService.Service
+	llmService    *llmService.Service
 }
 
 // NewHandler 创建 Admin Handler
@@ -41,6 +48,8 @@ func NewHandler(
 	convSvc *convService.Service,
 	memoirSvc *memoirService.Service,
 	topicSvc *topicService.Service,
+	quoteSvc *quoteService.Service,
+	llmSvc *llmService.Service,
 ) *Handler {
 	return &Handler{
 		llmManager:    llmManager,
@@ -50,6 +59,8 @@ func NewHandler(
 		convService:   convSvc,
 		memoirService: memoirSvc,
 		topicService:  topicSvc,
+		quoteService:  quoteSvc,
+		llmService:    llmSvc,
 	}
 }
 
@@ -282,8 +293,91 @@ func (h *Handler) DeleteMemoir(c *gin.Context) {
 
 // RegenerateMemoir 重新生成回忆录
 func (h *Handler) RegenerateMemoir(c *gin.Context) {
-	// TODO: 需要 LLM Service 实现回忆录生成
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented - requires LLM service"})
+	memoirID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memoir id"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 获取回忆录
+	m, err := h.memoirService.AdminGetByID(ctx, memoirID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, memoirService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 必须有关联的对话
+	if m.ConversationID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "memoir has no associated conversation"})
+		return
+	}
+
+	// 获取对话及消息
+	conv, err := h.convService.AdminGetWithMessages(ctx, *m.ConversationID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get conversation: " + err.Error()})
+		return
+	}
+
+	// 获取用户信息
+	user, err := h.userService.GetByID(ctx, m.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user: " + err.Error()})
+		return
+	}
+
+	// 构建对话文本
+	var sb strings.Builder
+	for _, msg := range conv.Messages {
+		role := "用户"
+		if msg.Role == "assistant" {
+			role = "助手"
+		}
+		sb.WriteString(fmt.Sprintf("%s：%s\n\n", role, msg.Content))
+	}
+	conversationText := sb.String()
+
+	// 调用 LLM 重新生成
+	result, err := h.llmService.GenerateMemoir(ctx, &llmService.GenerateMemoirInput{
+		UserName:     user.DisplayName(),
+		BirthYear:    user.BirthYear,
+		Hometown:     derefString(user.Hometown),
+		Topic:        derefString(conv.Topic),
+		Conversation: conversationText,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate memoir: " + err.Error()})
+		return
+	}
+
+	// 更新回忆录
+	updatedMemoir, err := h.memoirService.AdminUpdate(ctx, memoirID, &memoir.UpdateMemoirInput{
+		Title:      &result.Title,
+		Content:    &result.Content,
+		TimePeriod: &result.TimePeriod,
+		StartYear:  result.StartYear,
+		EndYear:    result.EndYear,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update memoir: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, updatedMemoir)
+}
+
+// derefString 安全解引用字符串指针
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // --- 话题管理 ---
@@ -416,26 +510,95 @@ func (h *Handler) DeleteTopic(c *gin.Context) {
 
 // ListQuotes 获取激励语列表
 func (h *Handler) ListQuotes(c *gin.Context) {
-	// TODO: 实现
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	// 可选的类型过滤
+	var quoteType *quote.Type
+	if t := c.Query("type"); t != "" {
+		qt := quote.Type(t)
+		quoteType = &qt
+	}
+
+	// 是否只返回激活的
+	activeOnly := c.Query("active_only") == "true"
+
+	quotes, total, err := h.quoteService.List(c.Request.Context(), quoteType, activeOnly, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"quotes":    quotes,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
 }
 
 // CreateQuote 创建激励语
 func (h *Handler) CreateQuote(c *gin.Context) {
-	// TODO: 实现
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	var input quote.CreateQuoteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	q, err := h.quoteService.Create(c.Request.Context(), &input)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, q)
 }
 
 // UpdateQuote 更新激励语
 func (h *Handler) UpdateQuote(c *gin.Context) {
-	// TODO: 实现
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	quoteID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid quote id"})
+		return
+	}
+
+	var input quote.UpdateQuoteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	q, err := h.quoteService.Update(c.Request.Context(), quoteID, &input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, quoteService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, q)
 }
 
 // DeleteQuote 删除激励语
 func (h *Handler) DeleteQuote(c *gin.Context) {
-	// TODO: 实现
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	quoteID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid quote id"})
+		return
+	}
+
+	if err := h.quoteService.Delete(c.Request.Context(), quoteID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, quoteService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "quote deleted"})
 }
 
 // --- 系统监控 ---

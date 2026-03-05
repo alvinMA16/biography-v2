@@ -20,11 +20,13 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/tts/doubao"
 	convRepo "github.com/peizhengma/biography-v2/internal/repository/conversation"
 	memoirRepo "github.com/peizhengma/biography-v2/internal/repository/memoir"
+	quoteRepo "github.com/peizhengma/biography-v2/internal/repository/quote"
 	topicRepo "github.com/peizhengma/biography-v2/internal/repository/topic"
 	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
@@ -65,6 +67,9 @@ func main() {
 	topicRepository := topicRepo.New(db.Pool())
 	topicSvc := topicService.New(topicRepository)
 
+	quoteRepository := quoteRepo.New(db.Pool())
+	quoteSvc := quoteService.New(quoteRepository)
+
 	// 初始化 LLM Service
 	llmSvc := llmService.New(llmManager)
 
@@ -79,6 +84,7 @@ func main() {
 		ConversationService: convSvc,
 		MemoirService:       memoirSvc,
 		TopicService:        topicSvc,
+		QuoteService:        quoteSvc,
 		LLMService:          llmSvc,
 	})
 

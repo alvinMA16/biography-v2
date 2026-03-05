@@ -15,6 +15,7 @@ import (
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
@@ -31,6 +32,7 @@ type RouterDeps struct {
 	ConversationService *convService.Service
 	MemoirService       *memoirService.Service
 	TopicService        *topicService.Service
+	QuoteService        *quoteService.Service
 	LLMService          *llmService.Service
 }
 
@@ -93,6 +95,9 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		deps.Config.JWTSecret,
 		deps.UserService,
 		deps.TopicService,
+		deps.ConversationService,
+		deps.MemoirService,
+		deps.LLMService,
 		deps.ASRProvider,
 		deps.LLMManager,
 		deps.TTSProvider,
@@ -110,6 +115,8 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		deps.ConversationService,
 		deps.MemoirService,
 		deps.TopicService,
+		deps.QuoteService,
+		deps.LLMService,
 	)
 
 	// 管理端路由（需要 Admin API Key）

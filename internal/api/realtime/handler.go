@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -9,9 +10,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/peizhengma/biography-v2/internal/domain/conversation"
+	"github.com/peizhengma/biography-v2/internal/domain/memoir"
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
+	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
+	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 )
@@ -27,12 +33,15 @@ var upgrader = websocket.Upgrader{
 
 // Handler 实时对话处理器
 type Handler struct {
-	jwtSecret    string
-	userService  *userService.Service
-	topicService *topicService.Service
-	asrProvider  asr.Provider
-	llmManager   *llm.Manager
-	ttsProvider  tts.Provider
+	jwtSecret     string
+	userService   *userService.Service
+	topicService  *topicService.Service
+	convService   *convService.Service
+	memoirService *memoirService.Service
+	llmService    *llmService.Service
+	asrProvider   asr.Provider
+	llmManager    *llm.Manager
+	ttsProvider   tts.Provider
 }
 
 // NewHandler 创建处理器
@@ -40,17 +49,23 @@ func NewHandler(
 	jwtSecret string,
 	userSvc *userService.Service,
 	topicSvc *topicService.Service,
+	convSvc *convService.Service,
+	memoirSvc *memoirService.Service,
+	llmSvc *llmService.Service,
 	asrProvider asr.Provider,
 	llmManager *llm.Manager,
 	ttsProvider tts.Provider,
 ) *Handler {
 	return &Handler{
-		jwtSecret:    jwtSecret,
-		userService:  userSvc,
-		topicService: topicSvc,
-		asrProvider:  asrProvider,
-		llmManager:   llmManager,
-		ttsProvider:  ttsProvider,
+		jwtSecret:     jwtSecret,
+		userService:   userSvc,
+		topicService:  topicSvc,
+		convService:   convSvc,
+		memoirService: memoirSvc,
+		llmService:    llmSvc,
+		asrProvider:   asrProvider,
+		llmManager:    llmManager,
+		ttsProvider:   ttsProvider,
 	}
 }
 
@@ -133,9 +148,102 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 
 	log.Printf("[Realtime] 连接关闭: user_id=%s", userID)
 
-	// TODO: 保存对话历史到数据库
-	// conversation := session.GetConversationText()
-	// messages := session.GetMessages()
+	// 保存对话历史（在后台执行）
+	go h.saveConversation(userID, config, session)
+}
+
+// saveConversation 保存对话历史并生成回忆录
+func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, session *Session) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	messages := session.GetMessages()
+
+	// 只有 user 和 assistant 消息，跳过 system
+	var userMessages []llm.Message
+	for _, msg := range messages {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			userMessages = append(userMessages, msg)
+		}
+	}
+
+	// 如果没有对话内容，跳过保存
+	if len(userMessages) < 2 {
+		log.Printf("[Realtime] 对话内容不足，跳过保存: user_id=%s", userID)
+		return
+	}
+
+	// Profile collection 模式不保存回忆录
+	if config.Mode == ModeProfileCollection {
+		log.Printf("[Realtime] Profile collection 模式，跳过保存: user_id=%s", userID)
+		// TODO: 可以在这里调用 llm service 提取 profile 并更新用户信息
+		return
+	}
+
+	// 创建对话记录
+	conv, err := h.convService.Create(ctx, userID, &conversation.CreateConversationInput{
+		Topic:    config.TopicTitle,
+		Greeting: config.TopicGreeting,
+		Context:  config.TopicContext,
+	})
+	if err != nil {
+		log.Printf("[Realtime] 创建对话失败: %v", err)
+		return
+	}
+
+	// 保存消息
+	for _, msg := range userMessages {
+		if err := h.convService.AddMessage(ctx, conv.ID, msg.Role, msg.Content); err != nil {
+			log.Printf("[Realtime] 保存消息失败: %v", err)
+		}
+	}
+
+	log.Printf("[Realtime] 对话保存成功: conversation_id=%s, messages=%d", conv.ID, len(userMessages))
+
+	// 生成摘要
+	conversationText := session.GetConversationText()
+	summary, err := h.llmService.GenerateSummary(ctx, config.TopicTitle, conversationText)
+	if err != nil {
+		log.Printf("[Realtime] 生成摘要失败: %v", err)
+	} else {
+		if err := h.convService.UpdateSummary(ctx, conv.ID, summary); err != nil {
+			log.Printf("[Realtime] 更新摘要失败: %v", err)
+		}
+	}
+
+	// 完成对话状态
+	if err := h.convService.Complete(ctx, conv.ID, userID); err != nil {
+		log.Printf("[Realtime] 完成对话失败: %v", err)
+	}
+
+	// 生成回忆录
+	memoirResult, err := h.llmService.GenerateMemoir(ctx, &llmService.GenerateMemoirInput{
+		UserName:     config.UserName,
+		BirthYear:    config.BirthYear,
+		Hometown:     config.Hometown,
+		Topic:        config.TopicTitle,
+		Conversation: conversationText,
+	})
+	if err != nil {
+		log.Printf("[Realtime] 生成回忆录失败: %v", err)
+		return
+	}
+
+	// 保存回忆录
+	_, err = h.memoirService.Create(ctx, userID, &memoir.CreateMemoirInput{
+		ConversationID: &conv.ID,
+		Title:          memoirResult.Title,
+		Content:        memoirResult.Content,
+		TimePeriod:     memoirResult.TimePeriod,
+		StartYear:      memoirResult.StartYear,
+		EndYear:        memoirResult.EndYear,
+	})
+	if err != nil {
+		log.Printf("[Realtime] 保存回忆录失败: %v", err)
+		return
+	}
+
+	log.Printf("[Realtime] 回忆录生成成功: conversation_id=%s, title=%s", conv.ID, memoirResult.Title)
 }
 
 // validateToken 验证 JWT token
