@@ -284,10 +284,17 @@ func (s *Service) AdminCreate(ctx context.Context, input *user.AdminCreateInput)
 		Phone:        input.Phone,
 		PasswordHash: passwordHash,
 		Nickname:     input.Nickname,
+		Gender:       input.Gender,
+		BirthYear:    input.BirthYear,
+		Hometown:     input.Hometown,
+		MainCity:     input.MainCity,
 		IsActive:     true,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+
+	// 检查是否完成资料填写
+	u.ProfileCompleted = isProfileCompleted(u)
 
 	if err := s.repo.Create(ctx, u); err != nil {
 		if errors.Is(err, userRepo.ErrAlreadyExists) {

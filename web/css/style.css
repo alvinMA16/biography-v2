@@ -1,5 +1,4 @@
-/* Google Fonts 国内镜像 - Noto Serif SC，跨平台统一印刷体 */
-@import url('https://fonts.googleapis.cn/css2?family=Noto+Serif+SC:wght@400;500;700&display=swap');
+/* 使用系统宋体，无需网络加载 */
 
 /* 纸质书风格 - 清新淡雅 */
 
@@ -24,8 +23,8 @@ html, body {
     --color-accent-light: #A0522D; /* 浅棕红 */
     --color-border: #E8E4DE;       /* 边框色 */
 
-    /* 字体 */
-    --font-serif: "Noto Serif SC", "Source Han Serif CN", "Songti SC", Georgia, serif;
+    /* 字体 - 使用系统宋体 */
+    --font-serif: "Songti SC", "STSong", "SimSun", "NSimSun", Georgia, serif;
     --font-sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 
     /* 统一间距 */

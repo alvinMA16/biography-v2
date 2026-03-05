@@ -99,9 +99,13 @@ const (
 
 // AdminCreateInput 管理员创建用户输入
 type AdminCreateInput struct {
-	Phone    string  `json:"phone" binding:"required"`
-	Password string  `json:"password" binding:"required,min=6"`
-	Nickname *string `json:"nickname"`
+	Phone     string  `json:"phone" binding:"required"`
+	Password  string  `json:"password" binding:"required,min=6"`
+	Nickname  *string `json:"nickname"`
+	Gender    *string `json:"gender"`
+	BirthYear *int    `json:"birth_year"`
+	Hometown  *string `json:"hometown"`
+	MainCity  *string `json:"main_city"`
 }
 
 // UserSettings 用户偏好设置
