@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的回忆</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .memoir-item {
+            position: relative;
+        }
+        .memoir-item .btn-delete {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--color-text-light);
+            cursor: pointer;
+            padding: 8px 12px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .memoir-item:hover .btn-delete {
+            opacity: 1;
+        }
+        .memoir-item .btn-delete:hover {
+            color: #c0392b;
+        }
+        .memoir-item-content {
+            padding-right: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container inner-page memoir-page">
+        <header class="page-header">
+            <button class="btn-back" onclick="goHome()">返回</button>
+            <h1 class="header-title">我的回忆</h1>
+            <span class="header-spacer"></span>
+        </header>
+
+        <main class="page-content">
+            <!-- 回忆录列表 -->
+            <div class="memoir-list" id="memoirList">
+                <!-- 动态插入 -->
+            </div>
+
+            <!-- 空状态 -->
+            <div class="empty-state" id="emptyState" style="display: none;">
+                <p>还没有回忆录</p>
+                <p>和我聊聊天，我会帮您整理成文字</p>
+                <button class="btn btn-primary" onclick="goHome()">开始讲述</button>
+            </div>
+        </main>
+    </div>
+
+    <!-- 回忆录详情弹窗 -->
+    <div class="modal" id="memoirModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="memoirTitle"></h2>
+                <button class="btn-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="memoir-content" id="memoirContent"></div>
+            </div>
+            <div class="modal-footer memoir-actions">
+                <select id="perspectiveSelect" class="perspective-select">
+                    <option value="第一人称">第一人称（我）</option>
+                    <option value="第三人称">第三人称（他/她）</option>
+                </select>
+                <button class="btn btn-secondary" onclick="regenerateMemoir()" id="regenerateBtn">
+                    重新生成
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/memoir.js"></script>
+</body>
+</html>

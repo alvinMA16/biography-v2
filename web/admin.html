@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 - 回忆录</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="admin-page">
+        <!-- 认证区域 -->
+        <div id="authSection" class="admin-auth">
+            <div class="admin-auth-card">
+                <h1>回忆录 · 管理后台</h1>
+                <p class="admin-auth-subtitle">请输入管理密钥以继续</p>
+                <div class="admin-auth-form">
+                    <input type="password" id="adminKeyInput" placeholder="Admin Key" class="admin-input">
+                    <button onclick="verifyKey()" class="btn btn-primary">验证</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主内容区：侧边栏 + 内容 -->
+        <div id="mainSection" class="admin-layout" style="display:none;">
+            <!-- 侧边栏 -->
+            <aside class="admin-sidebar">
+                <div class="admin-sidebar-header">
+                    <h2>回忆录</h2>
+                    <span>管理后台</span>
+                </div>
+                <nav class="admin-sidebar-nav">
+                    <button class="admin-nav-item active" data-tab="users" onclick="switchTab('users')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+                        用户管理
+                    </button>
+                    <button class="admin-nav-item" data-tab="logs" onclick="switchTab('logs')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                        操作日志
+                    </button>
+                    <button class="admin-nav-item" data-tab="era-memories" onclick="switchTab('era-memories')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        时代记忆
+                    </button>
+                    <button class="admin-nav-item" data-tab="welcome-messages" onclick="switchTab('welcome-messages')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/></svg>
+                        激励语
+                    </button>
+                    <button class="admin-nav-item" data-tab="preset-topics" onclick="switchTab('preset-topics')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="20" cy="18" r="2"/></svg>
+                        初始话题
+                    </button>
+                    <button class="admin-nav-item" data-tab="monitoring" onclick="switchTab('monitoring')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                        数据监控
+                    </button>
+                </nav>
+                <div class="admin-sidebar-footer">
+                    <button class="admin-nav-item admin-logout-btn" onclick="logout()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                        退出登录
+                    </button>
+                </div>
+            </aside>
+
+            <!-- 内容区 -->
+            <main class="admin-main-area">
+                <!-- 用户管理 Tab -->
+                <div id="tabUsers" class="admin-tab-panel active">
+                    <header class="admin-panel-header">
+                        <h1>用户管理</h1>
+                        <button class="btn btn-primary" onclick="showCreateModal()">新建用户</button>
+                    </header>
+                    <div class="admin-panel-content">
+                        <div class="admin-card">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>手机号</th>
+                                        <th>昵称</th>
+                                        <th>出生年份</th>
+                                        <th>资料状态</th>
+                                        <th>账号状态</th>
+                                        <th>对话/回忆</th>
+                                        <th>创建时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="userTableBody">
+                                    <tr><td colspan="8" class="admin-table-empty">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 操作日志 Tab -->
+                <div id="tabLogs" class="admin-tab-panel">
+                    <header class="admin-panel-header">
+                        <h1>操作日志</h1>
+                    </header>
+                    <div class="admin-panel-content">
+                        <div class="admin-card">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>操作</th>
+                                        <th>对象</th>
+                                        <th>详情</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="logTableBody">
+                                    <tr><td colspan="4" class="admin-table-empty">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 时代记忆 Tab -->
+                <div id="tabEraMemories" class="admin-tab-panel">
+                    <header class="admin-panel-header">
+                        <h1>时代记忆</h1>
+                        <button class="btn btn-primary" onclick="showEraMemoryModal()">新增记忆</button>
+                    </header>
+                    <div class="admin-panel-content">
+                        <div class="admin-card">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:100px;">年份</th>
+                                        <th style="width:100px;">分类</th>
+                                        <th>内容</th>
+                                        <th style="width:120px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="eraMemoryTableBody">
+                                    <tr><td colspan="4" class="admin-table-empty">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 激励语 Tab -->
+                <div id="tabWelcomeMessages" class="admin-tab-panel">
+                    <header class="admin-panel-header">
+                        <h1>激励语管理</h1>
+                        <button class="btn btn-primary" onclick="showWelcomeMessageModal()">新增激励语</button>
+                    </header>
+                    <div class="admin-panel-content">
+                        <div class="admin-card">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>内容</th>
+                                        <th style="width:80px;">问候语</th>
+                                        <th style="width:80px;">排序</th>
+                                        <th style="width:80px;">状态</th>
+                                        <th style="width:150px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="welcomeMessageTableBody">
+                                    <tr><td colspan="5" class="admin-table-empty">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 初始话题 Tab -->
+                <div id="tabPresetTopics" class="admin-tab-panel">
+                    <header class="admin-panel-header">
+                        <h1>初始话题管理</h1>
+                        <button class="btn btn-primary" onclick="showPresetTopicModal()">新增话题</button>
+                    </header>
+                    <div class="admin-panel-content">
+                        <div class="admin-card">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>话题名称</th>
+                                        <th>开场白</th>
+                                        <th style="width:80px;">排序</th>
+                                        <th style="width:80px;">状态</th>
+                                        <th style="width:150px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="presetTopicTableBody">
+                                    <tr><td colspan="5" class="admin-table-empty">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 数据监控 Tab -->
+                <div id="tabMonitoring" class="admin-tab-panel">
+                    <header class="admin-panel-header">
+                        <h1>数据监控</h1>
+                        <button class="admin-btn admin-btn-sm" onclick="refreshMonitoring()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                            </svg>
+                            刷新
+                        </button>
+                    </header>
+                    <div class="admin-panel-content admin-monitoring-content">
+                        <!-- 核心指标概览 -->
+                        <div class="admin-metrics-overview">
+                            <div class="admin-metric-card admin-metric-primary">
+                                <div class="admin-metric-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+                                </div>
+                                <div class="admin-metric-content">
+                                    <div class="admin-metric-value" id="statTotalUsers">-</div>
+                                    <div class="admin-metric-label">总用户</div>
+                                </div>
+                                <div class="admin-metric-extra">
+                                    <span class="admin-metric-tag" id="statProfileRate">-</span>
+                                    <span class="admin-metric-desc">资料完成率</span>
+                                </div>
+                            </div>
+                            <div class="admin-metric-card">
+                                <div class="admin-metric-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                                </div>
+                                <div class="admin-metric-content">
+                                    <div class="admin-metric-value" id="statTotalConversations">-</div>
+                                    <div class="admin-metric-label">总对话</div>
+                                </div>
+                                <div class="admin-metric-extra">
+                                    <span class="admin-metric-highlight" id="statTodayConv">-</span>
+                                    <span class="admin-metric-desc">今日新增</span>
+                                </div>
+                            </div>
+                            <div class="admin-metric-card">
+                                <div class="admin-metric-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                                </div>
+                                <div class="admin-metric-content">
+                                    <div class="admin-metric-value" id="statTotalMemoirs">-</div>
+                                    <div class="admin-metric-label">总回忆录</div>
+                                </div>
+                                <div class="admin-metric-extra">
+                                    <span class="admin-metric-highlight" id="statTodayMemoir">-</span>
+                                    <span class="admin-metric-desc">今日新增</span>
+                                </div>
+                            </div>
+                            <div class="admin-metric-card">
+                                <div class="admin-metric-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                </div>
+                                <div class="admin-metric-content">
+                                    <div class="admin-metric-value" id="statTodayActive">-</div>
+                                    <div class="admin-metric-label">今日活跃</div>
+                                </div>
+                                <div class="admin-metric-extra">
+                                    <span class="admin-metric-sub" id="statWeekActive">-</span>
+                                    <span class="admin-metric-desc">7日活跃</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 双栏布局：留存 + 用户画像 -->
+                        <div class="admin-monitor-grid">
+                            <!-- 用户留存 -->
+                            <div class="admin-monitor-section admin-retention-section">
+                                <div class="admin-section-header">
+                                    <h3>用户留存</h3>
+                                    <button class="admin-btn admin-btn-sm admin-btn-link" onclick="showRetentionMatrix()">详情</button>
+                                </div>
+                                <div class="admin-retention-visual">
+                                    <div class="admin-retention-ring" id="retentionRing">
+                                        <svg viewBox="0 0 120 120">
+                                            <circle class="ring-bg" cx="60" cy="60" r="50" fill="none" stroke-width="10"/>
+                                            <circle class="ring-fill" cx="60" cy="60" r="50" fill="none" stroke-width="10"
+                                                stroke-dasharray="314" stroke-dashoffset="314" id="retention7Ring"/>
+                                        </svg>
+                                        <div class="admin-retention-ring-label">
+                                            <span class="ring-value" id="statRetention7Display">-</span>
+                                            <span class="ring-text">7日留存</span>
+                                        </div>
+                                    </div>
+                                    <div class="admin-retention-list">
+                                        <div class="admin-retention-item">
+                                            <span class="retention-day">次日</span>
+                                            <div class="retention-bar-wrap">
+                                                <div class="retention-bar" id="retention1Bar"></div>
+                                            </div>
+                                            <span class="retention-value" id="statRetention1">-</span>
+                                        </div>
+                                        <div class="admin-retention-item">
+                                            <span class="retention-day">7日</span>
+                                            <div class="retention-bar-wrap">
+                                                <div class="retention-bar" id="retention7Bar"></div>
+                                            </div>
+                                            <span class="retention-value" id="statRetention7">-</span>
+                                        </div>
+                                        <div class="admin-retention-item">
+                                            <span class="retention-day">30日</span>
+                                            <div class="retention-bar-wrap">
+                                                <div class="retention-bar" id="retention30Bar"></div>
+                                            </div>
+                                            <span class="retention-value" id="statRetention30">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 用户画像 -->
+                            <div class="admin-monitor-section admin-profile-section">
+                                <div class="admin-section-header">
+                                    <h3>用户画像</h3>
+                                </div>
+                                <div class="admin-profile-charts">
+                                    <div class="admin-profile-chart">
+                                        <h4>出生年代</h4>
+                                        <div class="admin-donut-chart" id="birthDecadeDonut"></div>
+                                        <div class="admin-donut-legend" id="birthDecadeLegend"></div>
+                                    </div>
+                                    <div class="admin-profile-chart">
+                                        <h4>家乡分布</h4>
+                                        <div class="admin-donut-chart" id="hometownDonut"></div>
+                                        <div class="admin-donut-legend" id="hometownLegend"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 使用情况分布 -->
+                        <div class="admin-monitor-section admin-usage-section">
+                            <div class="admin-section-header">
+                                <h3>使用情况分布</h3>
+                            </div>
+                            <div class="admin-usage-grid">
+                                <div class="admin-usage-card">
+                                    <div class="admin-usage-header">
+                                        <h4>每人对话数</h4>
+                                        <span class="admin-usage-avg" id="avgConversations">-</span>
+                                    </div>
+                                    <div class="admin-usage-bars" id="distConversations"></div>
+                                </div>
+                                <div class="admin-usage-card">
+                                    <h4>每人回忆录数</h4>
+                                    <span class="admin-usage-avg" id="avgMemoirs">-</span>
+                                    <div class="admin-usage-bars" id="distMemoirs"></div>
+                                </div>
+                                <div class="admin-usage-card">
+                                    <h4>每对话消息数</h4>
+                                    <span class="admin-usage-avg" id="avgMessages">-</span>
+                                    <div class="admin-usage-bars" id="distMessages"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 用户详情页面 -->
+                <div id="tabUserDetail" class="admin-tab-panel">
+                    <header class="admin-panel-header">
+                        <div class="admin-header-left">
+                            <button class="admin-back-btn" onclick="backToUserList()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M15 18l-6-6 6-6"/>
+                                </svg>
+                            </button>
+                            <h1 id="userDetailTitle">用户详情</h1>
+                        </div>
+                        <div class="admin-detail-actions" id="userDetailActions"></div>
+                    </header>
+                    <div class="admin-panel-content admin-user-detail-content">
+                        <!-- 用户概览卡片 -->
+                        <div class="admin-user-profile-card">
+                            <div class="admin-profile-main">
+                                <div class="admin-profile-avatar" id="detailAvatar">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+                                        <circle cx="12" cy="7" r="4"/>
+                                    </svg>
+                                </div>
+                                <div class="admin-profile-info">
+                                    <div class="admin-profile-name" id="detailName">-</div>
+                                    <div class="admin-profile-meta">
+                                        <span class="meta-item" id="detailBirthYearMeta">-</span>
+                                        <span class="meta-divider"></span>
+                                        <span class="meta-item" id="detailLocationMeta">-</span>
+                                    </div>
+                                    <div class="admin-profile-badges">
+                                        <span class="admin-badge" id="detailStatusBadge">-</span>
+                                        <span class="admin-badge" id="detailProfileBadge">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="admin-profile-stats">
+                                <div class="admin-profile-stat">
+                                    <div class="stat-value" id="detailConvCount">0</div>
+                                    <div class="stat-label">对话</div>
+                                </div>
+                                <div class="admin-profile-stat">
+                                    <div class="stat-value" id="detailMemoirCount">0</div>
+                                    <div class="stat-label">回忆录</div>
+                                </div>
+                                <div class="admin-profile-stat">
+                                    <div class="stat-value" id="detailDaysActive">0</div>
+                                    <div class="stat-label">活跃天数</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 使用统计 -->
+                        <div class="admin-card admin-stats-card">
+                            <div class="admin-card-header">
+                                <h3>使用统计</h3>
+                            </div>
+                            <div class="admin-card-body">
+                                <!-- 累计数据 -->
+                                <div class="admin-stats-section">
+                                    <div class="admin-stats-section-title">累计数据</div>
+                                    <div class="admin-stats-grid">
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statTotalConv">-</div>
+                                            <div class="stat-label">
+                                                对话次数
+                                                <span class="stat-info" data-tooltip="用户发起的对话总次数">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statTotalMemoirs">-</div>
+                                            <div class="stat-label">
+                                                回忆录篇数
+                                                <span class="stat-info" data-tooltip="已生成的回忆录总篇数">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statTotalMessages">-</div>
+                                            <div class="stat-label">
+                                                消息总数
+                                                <span class="stat-info" data-tooltip="所有对话中的消息总数（含用户和AI）">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statTotalDuration">-</div>
+                                            <div class="stat-label">
+                                                对话总时长
+                                                <span class="stat-info" data-tooltip="所有对话的累计时长（从首条消息到末条消息）">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statTotalChars">-</div>
+                                            <div class="stat-label">
+                                                回忆录总字数
+                                                <span class="stat-info" data-tooltip="所有回忆录的累计字数">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- 平均数据 -->
+                                <div class="admin-stats-section">
+                                    <div class="admin-stats-section-title">平均数据</div>
+                                    <div class="admin-stats-grid">
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statAvgDuration">-</div>
+                                            <div class="stat-label">
+                                                平均对话时长
+                                                <span class="stat-info" data-tooltip="每次对话的平均时长（分钟），从首条消息到末条消息">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statAvgMessages">-</div>
+                                            <div class="stat-label">
+                                                平均消息轮数
+                                                <span class="stat-info" data-tooltip="每次对话的平均消息数（含用户和AI的消息）">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statConvRate">-</div>
+                                            <div class="stat-label">
+                                                对话转化率
+                                                <span class="stat-info" data-tooltip="成功生成回忆录的对话占比 = 有回忆录的对话数 / 总对话数">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statAvgMemoirLen">-</div>
+                                            <div class="stat-label">
+                                                回忆录均字数
+                                                <span class="stat-info" data-tooltip="每篇回忆录的平均字数 = 总字数 / 回忆录篇数">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="admin-stat-item">
+                                            <div class="stat-value" id="statFirstMemoirDays">-</div>
+                                            <div class="stat-label">
+                                                首篇回忆耗时
+                                                <span class="stat-info" data-tooltip="从账号创建到生成第一篇回忆录的天数">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- 人生阶段覆盖 -->
+                                <div class="admin-stats-section">
+                                    <div class="admin-stats-section-title">
+                                        人生阶段覆盖
+                                        <span class="stat-info" data-tooltip="回忆录覆盖的人生阶段分布，根据回忆录时间和用户出生年份推算">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                        </span>
+                                    </div>
+                                    <div class="stat-stages" id="statLifeStages">-</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 详细信息双栏 -->
+                        <div class="admin-detail-grid">
+                            <div class="admin-card admin-user-info-card">
+                                <div class="admin-card-header">
+                                    <h3>账号信息</h3>
+                                </div>
+                                <div class="admin-card-body">
+                                    <div class="admin-info-list">
+                                        <div class="admin-info-row">
+                                            <label>手机号</label>
+                                            <span id="detailPhone">-</span>
+                                        </div>
+                                        <div class="admin-info-row">
+                                            <label>创建时间</label>
+                                            <span id="detailCreatedAt">-</span>
+                                        </div>
+                                        <div class="admin-info-row">
+                                            <label>最后活跃</label>
+                                            <span id="detailLastActive">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="admin-card admin-user-info-card">
+                                <div class="admin-card-header">
+                                    <h3>个人信息</h3>
+                                </div>
+                                <div class="admin-card-body">
+                                    <div class="admin-info-list">
+                                        <div class="admin-info-row">
+                                            <label>姓名</label>
+                                            <span id="detailNickname">-</span>
+                                        </div>
+                                        <div class="admin-info-row">
+                                            <label>性别</label>
+                                            <span id="detailGender">-</span>
+                                        </div>
+                                        <div class="admin-info-row">
+                                            <label>称呼</label>
+                                            <span id="detailPreferredName">-</span>
+                                        </div>
+                                        <div class="admin-info-row">
+                                            <label>出生年份</label>
+                                            <span id="detailBirthYear">-</span>
+                                        </div>
+                                        <div class="admin-info-row">
+                                            <label>家乡</label>
+                                            <span id="detailHometown">-</span>
+                                        </div>
+                                        <div class="admin-info-row">
+                                            <label>常住城市</label>
+                                            <span id="detailMainCity">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 话题池 -->
+                        <div class="admin-card admin-topic-pool-card">
+                            <div class="admin-card-header">
+                                <h3>话题池</h3>
+                                <span class="admin-count-badge" id="topicPoolCount">0</span>
+                            </div>
+                            <div class="admin-card-body" id="topicPoolContainer">
+                                <div class="admin-empty-state">暂无话题</div>
+                            </div>
+                        </div>
+
+                        <!-- 时代记忆 -->
+                        <div class="admin-card admin-era-memory-card" id="eraMemoryCard" style="display:none;">
+                            <div class="admin-card-header">
+                                <h3>时代记忆</h3>
+                                <button class="admin-btn admin-btn-sm admin-btn-link" onclick="toggleEraMemory()">
+                                    <span id="eraMemoryToggle">展开</span>
+                                </button>
+                            </div>
+                            <div class="admin-card-body" id="eraMemoryContent" style="display:none;">
+                                <div class="admin-era-memory-text" id="eraMemoryText">-</div>
+                            </div>
+                        </div>
+
+                        <!-- 回忆时间线 -->
+                        <div class="admin-card admin-memoir-timeline-card">
+                            <div class="admin-card-header">
+                                <h3>回忆录</h3>
+                                <span class="admin-count-badge" id="memoirCount">0</span>
+                            </div>
+                            <div class="admin-card-body" id="memoirListContainer">
+                                <div class="admin-empty-state">暂无回忆录</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 创建用户弹窗 -->
+    <div class="modal" id="createModal" style="display:none;" onclick="if(event.target===this)closeCreateModal()">
+        <div class="modal-content admin-modal-form">
+            <div class="modal-header">
+                <h2>新建用户</h2>
+                <button class="btn-close" onclick="closeCreateModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="admin-form-grid">
+                    <div class="admin-form-group admin-form-full">
+                        <label>手机号 <span class="required">*</span></label>
+                        <input type="text" id="createPhone" class="admin-input" placeholder="请输入手机号">
+                    </div>
+                    <div class="admin-form-group admin-form-full">
+                        <label>密码 <span class="required">*</span></label>
+                        <input type="text" id="createPassword" class="admin-input" placeholder="请输入密码">
+                    </div>
+                    <div class="admin-form-divider"></div>
+                    <div class="admin-form-group">
+                        <label>姓名 <span class="required">*</span></label>
+                        <input type="text" id="createNickname" class="admin-input" placeholder="老人姓名" required>
+                    </div>
+                    <div class="admin-form-group">
+                        <label>性别 <span class="required">*</span></label>
+                        <select id="createGender" class="admin-input" required>
+                            <option value="">请选择</option>
+                            <option value="男">男</option>
+                            <option value="女">女</option>
+                        </select>
+                    </div>
+                    <div class="admin-form-group">
+                        <label>出生年份</label>
+                        <input type="number" id="createBirthYear" class="admin-input" placeholder="如 1950" min="1900" max="2000">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>家乡</label>
+                        <input type="text" id="createHometown" class="admin-input" placeholder="如 湖南长沙">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>常住城市</label>
+                        <input type="text" id="createMainCity" class="admin-input" placeholder="如 北京">
+                    </div>
+                </div>
+                <div class="admin-modal-footer">
+                    <button class="admin-modal-btn admin-modal-btn-cancel" onclick="closeCreateModal()">取消</button>
+                    <button class="admin-modal-btn admin-modal-btn-confirm" onclick="createUser()">创建</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑用户弹窗 -->
+    <div class="modal" id="editModal" style="display:none;" onclick="if(event.target===this)closeEditModal()">
+        <div class="modal-content admin-modal-form">
+            <div class="modal-header">
+                <h2>编辑用户</h2>
+                <button class="btn-close" onclick="closeEditModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editUserId">
+                <div class="admin-form-grid">
+                    <div class="admin-form-group">
+                        <label>姓名</label>
+                        <input type="text" id="editNickname" class="admin-input" placeholder="老人姓名">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>性别</label>
+                        <select id="editGender" class="admin-input">
+                            <option value="">请选择</option>
+                            <option value="男">男</option>
+                            <option value="女">女</option>
+                        </select>
+                    </div>
+                    <div class="admin-form-group">
+                        <label>出生年份</label>
+                        <input type="number" id="editBirthYear" class="admin-input" placeholder="如 1950" min="1900" max="2000">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>家乡</label>
+                        <input type="text" id="editHometown" class="admin-input" placeholder="如 湖南长沙">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>常住城市</label>
+                        <input type="text" id="editMainCity" class="admin-input" placeholder="如 北京">
+                    </div>
+                </div>
+                <div class="admin-modal-footer">
+                    <button class="admin-modal-btn admin-modal-btn-cancel" onclick="closeEditModal()">取消</button>
+                    <button class="admin-modal-btn admin-modal-btn-confirm" onclick="saveEdit()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新密码展示弹窗 -->
+    <div class="modal" id="passwordModal" style="display:none;" onclick="if(event.target===this)closePasswordModal()">
+        <div class="modal-content" style="max-width:380px;">
+            <div class="modal-header">
+                <h2>密码已重置</h2>
+                <button class="btn-close" onclick="closePasswordModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align:center;">
+                <p class="admin-password-hint">新密码如下，请妥善保管：</p>
+                <div class="admin-password-display">
+                    <code id="newPasswordText"></code>
+                </div>
+                <button id="copyBtn" class="btn btn-secondary" onclick="copyPassword()" style="margin-top:16px;">复制</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 时代记忆编辑弹窗 -->
+    <div class="modal" id="eraMemoryModal" style="display:none;" onclick="if(event.target===this)closeEraMemoryModal()">
+        <div class="modal-content admin-modal-form">
+            <div class="modal-header">
+                <h2 id="eraMemoryModalTitle">新增时代记忆</h2>
+                <button class="btn-close" onclick="closeEraMemoryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="eraMemoryId">
+                <div class="admin-form-grid">
+                    <div class="admin-form-group">
+                        <label>起始年份 <span class="required">*</span></label>
+                        <input type="number" id="eraMemoryStartYear" class="admin-input" placeholder="如 1950" min="1900" max="2030">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>结束年份 <span class="required">*</span></label>
+                        <input type="number" id="eraMemoryEndYear" class="admin-input" placeholder="如 1959" min="1900" max="2030">
+                    </div>
+                    <div class="admin-form-group admin-form-full">
+                        <label>分类</label>
+                        <select id="eraMemoryCategory" class="admin-input">
+                            <option value="">不分类</option>
+                            <option value="历史事件">历史事件</option>
+                            <option value="流行文化">流行文化</option>
+                            <option value="社会风潮">社会风潮</option>
+                            <option value="品牌零食">品牌零食</option>
+                            <option value="科技发展">科技发展</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="admin-form-group admin-form-full">
+                        <label>内容 <span class="required">*</span></label>
+                        <textarea id="eraMemoryContent" class="admin-input" rows="3" placeholder="事件或现象描述"></textarea>
+                    </div>
+                </div>
+                <div class="admin-modal-footer">
+                    <button class="admin-modal-btn admin-modal-btn-cancel" onclick="closeEraMemoryModal()">取消</button>
+                    <button class="admin-modal-btn admin-modal-btn-confirm" onclick="saveEraMemory()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 留存矩阵弹窗 -->
+    <div class="modal" id="retentionModal" style="display:none;" onclick="if(event.target===this)closeRetentionModal()">
+        <div class="modal-content admin-retention-modal">
+            <div class="modal-header">
+                <h2>留存矩阵</h2>
+                <button class="btn-close" onclick="closeRetentionModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="admin-retention-table-wrap">
+                    <table class="admin-table admin-retention-table">
+                        <thead>
+                            <tr>
+                                <th>注册日期</th>
+                                <th>新增</th>
+                                <th>次日</th>
+                                <th>3日</th>
+                                <th>7日</th>
+                                <th>14日</th>
+                                <th>30日</th>
+                            </tr>
+                        </thead>
+                        <tbody id="retentionMatrixBody">
+                            <tr><td colspan="7" class="admin-table-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 回忆详情弹窗 -->
+    <div class="modal" id="memoirDetailModal" style="display:none;" onclick="if(event.target===this)closeMemoirDetailModal()">
+        <div class="modal-content admin-memoir-detail-modal">
+            <div class="modal-header">
+                <h2 id="memoirDetailTitle">回忆详情</h2>
+                <button class="btn-close" onclick="closeMemoirDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="admin-memoir-detail-tabs">
+                    <button class="admin-memoir-tab active" data-tab="memoir" onclick="switchMemoirTab('memoir')">回忆录</button>
+                    <button class="admin-memoir-tab" data-tab="transcript" onclick="switchMemoirTab('transcript')">对话记录</button>
+                </div>
+                <div class="admin-memoir-detail-content">
+                    <!-- 回忆录内容 -->
+                    <div id="memoirTabContent" class="admin-memoir-tab-panel active">
+                        <div class="admin-memoir-meta" id="memoirMeta"></div>
+                        <div class="admin-memoir-text" id="memoirText">暂无内容</div>
+                    </div>
+                    <!-- 对话记录 -->
+                    <div id="transcriptTabContent" class="admin-memoir-tab-panel">
+                        <div class="admin-transcript-list" id="transcriptList">暂无对话记录</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 激励语编辑弹窗 -->
+    <div class="modal" id="welcomeMessageModal" style="display:none;" onclick="if(event.target===this)closeWelcomeMessageModal()">
+        <div class="modal-content admin-modal-form">
+            <div class="modal-header">
+                <h2 id="welcomeMessageModalTitle">新增激励语</h2>
+                <button class="btn-close" onclick="closeWelcomeMessageModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="welcomeMessageId">
+                <div class="admin-form-grid">
+                    <div class="admin-form-group admin-form-full">
+                        <label>激励语内容 <span class="required">*</span></label>
+                        <textarea id="welcomeMessageContent" class="admin-input" rows="3" placeholder="请输入激励语内容"></textarea>
+                    </div>
+                    <div class="admin-form-group">
+                        <label>排序权重</label>
+                        <input type="number" id="welcomeMessageSortOrder" class="admin-input" placeholder="0" min="0" value="0">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>显示问候语</label>
+                        <label class="admin-toggle">
+                            <input type="checkbox" id="welcomeMessageShowGreeting" checked>
+                            <span class="admin-toggle-slider"></span>
+                            <span class="admin-toggle-label">如"早上好，张先生"</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="admin-modal-footer">
+                    <button class="admin-modal-btn admin-modal-btn-cancel" onclick="closeWelcomeMessageModal()">取消</button>
+                    <button class="admin-modal-btn admin-modal-btn-confirm" onclick="saveWelcomeMessage()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 预设话题编辑弹窗 -->
+    <div class="modal" id="presetTopicModal" style="display:none;" onclick="if(event.target===this)closePresetTopicModal()">
+        <div class="modal-content admin-modal-form">
+            <div class="modal-header">
+                <h2 id="presetTopicModalTitle">新增初始话题</h2>
+                <button class="btn-close" onclick="closePresetTopicModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="presetTopicId">
+                <div class="admin-form-grid">
+                    <div class="admin-form-group admin-form-full">
+                        <label>话题名称 <span class="required">*</span></label>
+                        <input type="text" id="presetTopicName" class="admin-input" placeholder="如：成长与家庭">
+                    </div>
+                    <div class="admin-form-group admin-form-full">
+                        <label>开场白 <span class="required">*</span></label>
+                        <textarea id="presetTopicGreeting" class="admin-input" rows="3" placeholder="用户选择此话题后的开场白"></textarea>
+                    </div>
+                    <div class="admin-form-group admin-form-full">
+                        <label>对话上下文</label>
+                        <textarea id="presetTopicChatContext" class="admin-input" rows="4" placeholder="追问路径、核心想知道等（可选）"></textarea>
+                    </div>
+                    <div class="admin-form-group">
+                        <label>起始年龄</label>
+                        <input type="number" id="presetTopicAgeStart" class="admin-input" placeholder="如 0" min="0" max="100">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>结束年龄</label>
+                        <input type="number" id="presetTopicAgeEnd" class="admin-input" placeholder="如 18" min="0" max="100">
+                    </div>
+                    <div class="admin-form-group">
+                        <label>排序权重</label>
+                        <input type="number" id="presetTopicSortOrder" class="admin-input" placeholder="0" min="0" value="0">
+                    </div>
+                </div>
+                <div class="admin-modal-footer">
+                    <button class="admin-modal-btn admin-modal-btn-cancel" onclick="closePresetTopicModal()">取消</button>
+                    <button class="admin-modal-btn admin-modal-btn-confirm" onclick="savePresetTopic()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/admin.js"></script>
+</body>
+</html>

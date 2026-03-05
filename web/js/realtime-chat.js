@@ -1,0 +1,792 @@
+// 实时对话页面逻辑 - 基于豆包实时对话API
+
+// Debug 模式检测 - localhost 自动开启，线上可通过 ?debug=1 手动开启
+const urlParams = new URLSearchParams(window.location.search);
+const DEBUG_MODE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || urlParams.get('debug') === '1';
+
+// 增强模式检测 - 通过 URL 参数或 localStorage 控制
+const ENHANCED_MODE = urlParams.get('enhanced') === '1' || storage.get('useEnhancedMode') === 'true';
+
+let conversationId = null;
+let isProfileCollectionMode = false;  // 是否是信息收集模式
+let autoEndTriggered = false;  // 防止自动结束重复触发
+
+// WebSocket 相关
+let ws = null;
+let isConnected = false;
+
+// 音频相关
+let audioContext = null;
+let mediaStream = null;
+let audioWorklet = null;
+let scriptProcessor = null;
+
+// 音频播放相关
+let playbackContext = null;
+let audioQueue = [];
+let isPlaying = false;
+let nextPlayTime = 0;  // 下一个音频块的播放时间
+let gainNode = null;   // 音量控制节点
+
+// 状态
+let isRecording = false;
+let currentAIResponse = '';  // 累积AI回复文本
+let isAISpeaking = false;    // AI是否正在说话
+let isFirstTTS = true;       // 是否是第一次 TTS（开场白）
+let pendingGreeting = null;  // 后端发来的开场白文本，等 TTS 开始时显示
+
+// 配置
+const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
+const SAMPLE_RATE_OUTPUT = 24000; // 输出采样率（豆包TTS输出）
+const CHUNK_SIZE = 3200;          // 每次发送的音频块大小
+
+// 页面加载
+window.onload = async function() {
+    // 检查是否已登录
+    const token = storage.get('token');
+    if (!token) {
+        window.location.href = 'login.html';
+        return;
+    }
+
+    conversationId = storage.get('currentConversationId');
+
+    if (!conversationId) {
+        alert('未找到对话');
+        goHome();
+        return;
+    }
+
+    // 检查是否是信息收集模式
+    // 注意：如果有 profileJustCompleted 标记，说明信息收集刚完成，不要再进入收集模式
+    if (!storage.get('profileJustCompleted')) {
+        try {
+            const profile = await api.user.getProfile();
+            isProfileCollectionMode = !profile.profile_completed;
+            if (isProfileCollectionMode && DEBUG_MODE) {
+                console.log('进入信息收集模式');
+            }
+        } catch (error) {
+            console.error('获取用户信息失败:', error);
+        }
+    }
+
+    showLoading('正在连接');
+
+    // 初始化音频播放
+    initPlayback();
+
+    // 连接 WebSocket
+    await connectWebSocket();
+};
+
+// 提前请求麦克风权限，触发用户交互以解锁 AudioContext
+async function requestMicrophoneEarly() {
+    try {
+        DEBUG_MODE && console.log('提前请求麦克风权限...');
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                sampleRate: SAMPLE_RATE_INPUT,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            }
+        });
+        DEBUG_MODE && console.log('麦克风权限已获取');
+
+        // 用户点击了"允许"，这是用户交互，现在可以 resume AudioContext
+        if (playbackContext && playbackContext.state === 'suspended') {
+            await playbackContext.resume();
+            DEBUG_MODE && console.log('AudioContext 已恢复，状态:', playbackContext.state);
+        }
+    } catch (e) {
+        console.error('麦克风权限请求失败:', e);
+        updateAIText('无法访问麦克风，请检查权限');
+        updateVoiceStatus('麦克风错误');
+    }
+}
+
+// ========== WebSocket 连接 ==========
+
+// 记录师信息
+const RECORDER_INFO = {
+    female: { name: '小安', speaker: 'zh_female_vv_jupiter_bigtts' },
+    male: { name: '小川', speaker: 'zh_male_xiaotian_jupiter_bigtts' }
+};
+
+async function connectWebSocket() {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+
+    // 获取选中的记录师
+    const selectedRecorder = storage.get('selectedRecorder') || 'female';
+    const recorderInfo = RECORDER_INFO[selectedRecorder] || RECORDER_INFO.female;
+
+    // 获取 token
+    const token = storage.get('token');
+
+    // 获取选择的话题信息
+    const selectedTopic = storage.get('selectedTopic');
+    const selectedGreeting = storage.get('selectedTopicGreeting');
+    const selectedContext = storage.get('selectedTopicContext');
+    // 使用后清除，避免下次对话重复使用
+    storage.remove('selectedTopic');
+    storage.remove('selectedTopicGreeting');
+    storage.remove('selectedTopicContext');
+
+    // 构建 WebSocket URL，带上音色、记录师名字、对话ID和 token 参数
+    const params = new URLSearchParams({
+        speaker: recorderInfo.speaker,
+        recorder_name: recorderInfo.name,
+        conversation_id: conversationId,
+        token: token,
+    });
+
+    // 如果有选择的话题，添加到参数中
+    if (selectedTopic) {
+        params.set('topic', selectedTopic);
+    }
+    if (selectedGreeting) {
+        params.set('greeting', selectedGreeting);
+    }
+    if (selectedContext) {
+        params.set('context', selectedContext);
+    }
+
+    // 根据模式选择端点
+    const endpoint = ENHANCED_MODE ? '/api/realtime-enhanced/dialog' : '/api/realtime/dialog';
+    const wsUrl = `${wsProtocol}://${window.location.host}${endpoint}?${params.toString()}`;
+
+    if (DEBUG_MODE) {
+        console.log('连接 WebSocket:', wsUrl);
+        console.log('  - 模式:', ENHANCED_MODE ? '增强模式' : '普通模式');
+        console.log('  - 记录师:', recorderInfo.name);
+        console.log('  - 开场白:', selectedGreeting ? '自定义' : '默认');
+    }
+
+    // Debug 模式下显示干预容器
+    if (DEBUG_MODE && ENHANCED_MODE) {
+        const container = document.getElementById('interventionContainer');
+        if (container) {
+            container.style.display = 'flex';
+        }
+    }
+
+    try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            DEBUG_MODE && console.log('WebSocket 已连接');
+        };
+
+        ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            handleServerMessage(message);
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket 错误:', error);
+            showError('连接失败，请刷新重试');
+        };
+
+        ws.onclose = () => {
+            DEBUG_MODE && console.log('WebSocket 已关闭');
+            isConnected = false;
+            stopRecording();
+        };
+
+    } catch (error) {
+        console.error('WebSocket 连接失败:', error);
+        showError('连接失败，请刷新重试');
+    }
+}
+
+function handleServerMessage(message) {
+    // 音频消息量太大，debug 模式也不打印
+    if (DEBUG_MODE && message.type !== 'audio') {
+        console.log('收到消息:', message.type, message);
+    }
+
+    switch (message.type) {
+        case 'status':
+            if (message.status === 'connected') {
+                isConnected = true;
+                updateAIText('');  // 清空，等待 AI 开始说话后再显示
+                updateVoiceStatus('请稍候');
+                // 提前请求麦克风权限，用户点击"允许"后 AudioContext 就能正常播放
+                requestMicrophoneEarly();
+            } else if (message.status === 'error') {
+                showError(message.message);
+            }
+            break;
+
+        case 'audio':
+            // 收到音频数据，加入播放队列
+            const audioData = base64ToArrayBuffer(message.data);
+            queueAudio(audioData);
+            break;
+
+        case 'text':
+            // 收到文本
+            if (message.text_type === 'asr') {
+                // 用户说的话 - 不显示
+                DEBUG_MODE && console.log('用户说:', message.content);
+            } else if (message.text_type === 'response') {
+                // AI 回复文字 - 累积并显示
+                if (isAISpeaking && message.content) {
+                    currentAIResponse += message.content;  // 累积文本
+                    // 过滤掉结束标记（兜底，防止偶尔显示）
+                    const displayText = currentAIResponse.replace('【信息收集完成】', '').trim();
+                    updateAIText(displayText);
+                }
+            }
+            break;
+
+        case 'event':
+            handleEvent(message.event, message.payload);
+            break;
+
+        case 'debug':
+            // Debug 模式下显示调试信息
+            if (DEBUG_MODE && message.message) {
+                showToast(message.message);
+            }
+            break;
+
+        case 'greeting_text':
+            // 后端发来的开场白文本，等 TTS 开始时直接显示
+            pendingGreeting = message.content;
+            break;
+
+        case 'profile_collection_complete':
+            // 后端 Qwen 验证信息收集完成，自动结束对话
+            if (isProfileCollectionMode && !autoEndTriggered) {
+                autoEndTriggered = true;
+                DEBUG_MODE && console.log('收到后端信息收集完成确认，自动结束对话');
+                autoEndProfileCollection();
+            }
+            break;
+
+        case 'intervention':
+            // 干预状态通知 - 仅在 debug + 增强模式下显示
+            if (DEBUG_MODE && ENHANCED_MODE) {
+                showInterventionBubble(message.triggered, message.guidance, message.type_label, message.mechanism, message.timeout, message.timed_out);
+            }
+            break;
+    }
+}
+
+function handleEvent(event, payload) {
+    DEBUG_MODE && console.log('事件:', event, payload);
+
+    switch (event) {
+        case 350:
+            // TTS 开始 - AI 开始说话
+            isAISpeaking = true;
+            currentAIResponse = '';  // 清空，准备接收新回复
+            // 第一次 TTS：直接显示后端发来的开场白（不依赖豆包回显）
+            if (isFirstTTS && pendingGreeting) {
+                currentAIResponse = pendingGreeting;
+                updateAIText(pendingGreeting);
+                pendingGreeting = null;
+            }
+            updateVoiceStatus('记录师正在说话');
+            setVoiceActive(false);
+            break;
+
+        case 359:
+            // TTS 结束 - AI 说完了，可以开始录音
+            isAISpeaking = false;
+            // 第一次 TTS 结束后，标记已完成开场白
+            if (isFirstTTS) {
+                isFirstTTS = false;
+            }
+            updateVoiceStatus('请开始说话');
+            setTimeout(() => {
+                startRecording();
+            }, 500);
+            break;
+
+        case 450:
+            // 用户开始说话 - 清空音频队列，音波动起来
+            // 不更新上方文字，保持显示AI之前的问题
+            clearAudioQueue();
+            updateVoiceStatus('正在聆听...');
+            setVoiceActive(true);
+            break;
+
+        case 459:
+            // 用户说完 - AI 开始处理
+            updateVoiceStatus('正在思考...');
+            setVoiceActive(false);
+            break;
+
+        case 152:
+        case 153:
+            // 会话结束
+            isAISpeaking = false;
+            updateAIText('对话已结束');
+            updateVoiceStatus('已结束');
+            setVoiceActive(false);
+            stopRecording();
+            break;
+    }
+}
+
+// ========== 音频录制 ==========
+
+async function startRecording() {
+    if (isRecording || !isConnected) return;
+
+    try {
+        // 如果还没有 mediaStream（提前请求失败或未执行），现在请求
+        if (!mediaStream) {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    sampleRate: SAMPLE_RATE_INPUT,
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+        }
+
+        audioContext = new AudioContext({ sampleRate: SAMPLE_RATE_INPUT });
+        const source = audioContext.createMediaStreamSource(mediaStream);
+
+        // 使用 ScriptProcessor 获取音频数据
+        scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+        scriptProcessor.onaudioprocess = (e) => {
+            if (!isRecording || !isConnected) return;
+
+            const inputData = e.inputBuffer.getChannelData(0);
+            // 转换为 16bit PCM
+            const pcmData = float32ToPCM16(inputData);
+            // 发送到服务器
+            sendAudio(pcmData);
+        };
+
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(audioContext.destination);
+
+        isRecording = true;
+        updateVoiceStatus('请开始说话');
+
+    } catch (error) {
+        console.error('无法访问麦克风:', error);
+        updateAIText('无法访问麦克风，请检查权限');
+        updateVoiceStatus('麦克风错误');
+    }
+}
+
+function stopRecording() {
+    isRecording = false;
+
+    if (scriptProcessor) {
+        scriptProcessor.disconnect();
+        scriptProcessor = null;
+    }
+
+    if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+    }
+
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+    }
+}
+
+function sendAudio(pcmData) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const base64Data = arrayBufferToBase64(pcmData.buffer);
+    ws.send(JSON.stringify({
+        type: 'audio',
+        data: base64Data
+    }));
+}
+
+// ========== 音频播放 ==========
+
+function initPlayback() {
+    // 创建音频上下文，指定采样率
+    playbackContext = new AudioContext({ sampleRate: SAMPLE_RATE_OUTPUT });
+
+    // 创建音量控制节点
+    gainNode = playbackContext.createGain();
+    gainNode.gain.value = 1.0;
+    gainNode.connect(playbackContext.destination);
+
+    DEBUG_MODE && console.log('播放上下文采样率:', playbackContext.sampleRate);
+}
+
+async function queueAudio(audioData) {
+    // 确保 AudioContext 处于运行状态
+    if (playbackContext.state === 'suspended') {
+        await playbackContext.resume();
+    }
+
+    audioQueue.push(audioData);
+    if (!isPlaying) {
+        playNextAudio();
+    }
+}
+
+function clearAudioQueue() {
+    audioQueue = [];
+    isPlaying = false;
+    nextPlayTime = 0;  // 重置播放时间
+}
+
+async function playNextAudio() {
+    if (audioQueue.length === 0) {
+        isPlaying = false;
+        return;
+    }
+
+    isPlaying = true;
+
+    // 批量处理队列中的音频，使用精确的时间调度
+    while (audioQueue.length > 0) {
+        const audioData = audioQueue.shift();
+
+        try {
+            const floatData = pcm16LEToFloat32(audioData);
+
+            if (floatData.length === 0) {
+                continue;
+            }
+
+            // 应用淡入淡出来减少 click 声
+            applyFade(floatData);
+
+            const audioBuffer = playbackContext.createBuffer(1, floatData.length, SAMPLE_RATE_OUTPUT);
+            audioBuffer.getChannelData(0).set(floatData);
+
+            const source = playbackContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(gainNode);
+
+            // 计算播放时间，确保音频连续
+            const currentTime = playbackContext.currentTime;
+            if (nextPlayTime < currentTime) {
+                // 如果落后了，稍微往后推一点避免立即播放产生的 click
+                nextPlayTime = currentTime + 0.01;
+            }
+
+            source.start(nextPlayTime);
+            nextPlayTime += audioBuffer.duration;
+
+        } catch (error) {
+            console.error('播放音频失败:', error);
+        }
+    }
+
+    isPlaying = false;
+}
+
+// 应用淡入淡出效果减少音频块之间的 click 声
+function applyFade(samples) {
+    const fadeLength = Math.min(64, Math.floor(samples.length / 10));
+
+    // 淡入
+    for (let i = 0; i < fadeLength; i++) {
+        samples[i] *= i / fadeLength;
+    }
+
+    // 淡出
+    for (let i = 0; i < fadeLength; i++) {
+        samples[samples.length - 1 - i] *= i / fadeLength;
+    }
+}
+
+// ========== 界面控制 ==========
+
+// 显示干预调试气泡（仅 debug + 增强模式）
+function showInterventionBubble(triggered, guidance, typeLabel, mechanism, timeout, timedOut) {
+    const container = document.getElementById('interventionContainer');
+    if (!container) return;
+
+    const bubble = document.createElement('div');
+    const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (triggered && guidance) {
+        bubble.className = 'intervention-bubble';
+        const mechanismLabel = mechanism === 'knowledge' ? '知识注入' : '指令注入';
+        const tag = typeLabel ? `${typeLabel} · ${mechanismLabel}` : '触发干预';
+        bubble.innerHTML = `
+            <div class="bubble-header">${time} - ${tag}</div>
+            <div class="bubble-content">${guidance}</div>
+        `;
+    } else if (timeout) {
+        bubble.className = 'intervention-bubble intervention-timeout';
+        const detail = timedOut && timedOut.length ? timedOut.join('、') : '全部';
+        bubble.innerHTML = `
+            <div class="bubble-header">${time} - 判断超时</div>
+            <div class="bubble-content">超时任务: ${detail}</div>
+        `;
+    } else {
+        bubble.className = 'intervention-bubble no-intervention';
+        bubble.innerHTML = `
+            <div class="bubble-header">${time}</div>
+            <div class="bubble-content">无需干预</div>
+        `;
+    }
+
+    container.appendChild(bubble);
+
+    // 滚动到最新
+    container.scrollTop = container.scrollHeight;
+
+    // 限制气泡数量，超过 10 个删除最旧的
+    while (container.children.length > 10) {
+        container.removeChild(container.firstChild);
+    }
+
+    // 5 秒后淡出非触发的气泡
+    if (!triggered) {
+        setTimeout(() => {
+            bubble.style.animation = 'fadeOut 0.3s ease';
+            setTimeout(() => bubble.remove(), 300);
+        }, 3000);
+    }
+}
+
+// 显示轻量提示
+function showToast(message) {
+    // 创建 toast 元素
+    const toast = document.createElement('div');
+    toast.className = 'toast-message';
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 16px 24px;
+        border-radius: 8px;
+        font-size: 16px;
+        z-index: 9999;
+        animation: fadeIn 0.3s ease;
+    `;
+    document.body.appendChild(toast);
+
+    // 自动移除
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 1200);
+}
+
+// 更新 AI 文字内容
+function updateAIText(text) {
+    document.getElementById('aiText').textContent = text;
+}
+
+// 更新用户语音状态
+function updateVoiceStatus(text) {
+    document.getElementById('voiceStatus').textContent = text;
+}
+
+// 设置音波动画状态
+function setVoiceActive(active) {
+    const visualizer = document.getElementById('voiceVisualizer');
+    if (active) {
+        visualizer.classList.add('active');
+    } else {
+        visualizer.classList.remove('active');
+    }
+}
+
+// 简化的状态更新函数
+function showLoading(text) {
+    updateAIText(text + '...');
+    updateVoiceStatus('请稍候');
+    setVoiceActive(false);
+}
+
+function showError(text) {
+    updateAIText('错误: ' + text);
+    updateVoiceStatus('连接失败');
+    setVoiceActive(false);
+}
+
+// ========== 工具函数 ==========
+
+function float32ToPCM16(float32Array) {
+    const pcm16 = new Int16Array(float32Array.length);
+    for (let i = 0; i < float32Array.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32Array[i]));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return pcm16;
+}
+
+function pcm16LEToFloat32(arrayBuffer) {
+    // 显式按小端序读取 16bit PCM
+    const dataView = new DataView(arrayBuffer);
+    const numSamples = arrayBuffer.byteLength / 2;
+    const float32 = new Float32Array(numSamples);
+
+    for (let i = 0; i < numSamples; i++) {
+        // true = little-endian
+        const int16 = dataView.getInt16(i * 2, true);
+        float32[i] = int16 / 32768.0;
+    }
+    return float32;
+}
+
+function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+// ========== 页面控制 ==========
+
+// 自动结束信息收集（由AI触发）
+async function autoEndProfileCollection() {
+    DEBUG_MODE && console.log('自动结束信息收集对话');
+    conversationEnded = true;
+
+    stopRecording();
+
+    if (ws) {
+        ws.send(JSON.stringify({ type: 'stop' }));
+        ws.close();
+    }
+
+    updateAIText('正在保存...');
+    updateVoiceStatus('请稍候');
+
+    try {
+        // 结束对话
+        await api.conversation.endQuick(conversationId);
+        // 显示欢迎弹窗
+        await showWelcomeModal();
+    } catch (error) {
+        console.error('自动结束对话失败:', error);
+        // 出错也显示弹窗，让用户能回到主页
+        await showWelcomeModal();
+    }
+}
+
+let conversationEnded = false;
+
+async function endChat() {
+    if (conversationEnded) return;
+    if (!confirm('确定要结束这次对话吗？')) {
+        return;
+    }
+
+    conversationEnded = true;
+    stopRecording();
+
+    if (ws) {
+        ws.send(JSON.stringify({ type: 'stop' }));
+        ws.close();
+    }
+
+    updateAIText('正在保存...');
+    updateVoiceStatus('请稍候');
+
+    try {
+        // 结束对话（后台会处理摘要生成和开场白刷新）
+        await api.conversation.endQuick(conversationId);
+
+        if (isProfileCollectionMode) {
+            // 信息收集模式：显示欢迎弹窗
+            await showWelcomeModal();
+        } else {
+            // 正常对话模式：后台生成回忆录，直接跳转
+            api.memoir.generateAsync(conversationId);
+            // 显示简短提示后跳转
+            showToast('对话已保存，可在「我的回忆」中查看');
+            setTimeout(() => {
+                navigateHome();
+            }, 1500);
+        }
+    } catch (error) {
+        console.error('结束对话失败:', error);
+        alert('操作失败: ' + error.message);
+        navigateHome();
+    }
+}
+
+// 显示欢迎弹窗（信息收集完成后）
+async function showWelcomeModal() {
+    // 直接调用后端标记 profile 完成，不依赖后台异步任务
+    try {
+        await api.user.completeProfile();
+        DEBUG_MODE && console.log('已标记 profile 完成');
+    } catch (error) {
+        console.error('标记 profile 完成失败:', error);
+    }
+
+    // 清除临时标记（因为后端已经同步更新了）
+    storage.remove('profileJustCompleted');
+
+    const modal = document.getElementById('welcomeModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    } else {
+        // 如果没有弹窗元素，用 alert 兜底
+        alert('很高兴认识您！接下来就可以开始记录您的故事了。');
+        goHome();
+    }
+}
+
+function navigateHome() {
+    stopRecording();
+    if (ws) {
+        ws.close();
+    }
+    storage.remove('currentConversationId');
+    window.location.href = 'index.html';
+}
+
+// 兼容旧调用（欢迎弹窗等）
+function goHome() {
+    navigateHome();
+}
+
+window.onbeforeunload = function() {
+    stopRecording();
+    if (ws) {
+        ws.close();
+    }
+    // 用户直接关闭/刷新页面时，兜底结束对话（keepalive 允许页面关闭后请求继续）
+    if (conversationId && !conversationEnded) {
+        const token = storage.get('token');
+        const url = `${API_BASE_URL}/conversation/${conversationId}/end-quick`;
+        try {
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                keepalive: true,
+            });
+        } catch (e) {
+            // 忽略，页面即将关闭
+        }
+    }
+};

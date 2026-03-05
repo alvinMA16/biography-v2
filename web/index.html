@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>回忆录</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container home-page">
+        <!-- 菜单 -->
+        <div class="menu-container">
+            <button class="menu-btn" onclick="toggleDropdown()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="6" x2="21" y2="6"/>
+                    <line x1="3" y1="12" x2="21" y2="12"/>
+                    <line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+            </button>
+            <div class="dropdown" id="userDropdown">
+                <button class="dropdown-item" onclick="openRecorderSelect()">选择记录师</button>
+                <button class="dropdown-item" onclick="viewMemoirs()">我的回忆</button>
+                <button class="dropdown-item" id="eraMemoriesBtn" style="display: none;" onclick="viewEraMemories()">时代记忆</button>
+                <!-- <button class="dropdown-item" onclick="exportMyData()">导出我的数据</button> -->
+                <button class="dropdown-item" onclick="openChangePassword()">修改密码</button>
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-item" onclick="logout()">退出登录</button>
+                <button class="dropdown-item" style="color: #c0392b;" onclick="deleteAccount()">注销账号</button>
+            </div>
+        </div>
+
+        <header class="home-header">
+            <h1>回忆录</h1>
+            <p class="subtitle">记录您的人生故事</p>
+        </header>
+
+        <main class="welcome-section">
+            <div class="welcome-text" id="welcomeText">
+                <p>你好。</p>
+                <p>和我聊聊天，您的故事就变成了回忆录。</p>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="startNewChat()">新的故事</button>
+                <button class="btn btn-secondary" onclick="viewMemoirs()">旧的回忆</button>
+            </div>
+        </main>
+    </div>
+
+    <!-- 时代记忆弹窗 -->
+    <div class="modal" id="eraMemoriesModal" style="display: none;">
+        <div class="modal-content era-memories-modal">
+            <div class="modal-header">
+                <h2>时代记忆</h2>
+                <span class="era-status-badge" id="eraMemoriesStatus">-</span>
+                <button class="btn-close" onclick="closeEraMemoriesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="era-memories-info" id="eraMemoriesInfo">
+                    <p>出生年份：<span id="eraInfoBirthYear">-</span></p>
+                    <p>家乡：<span id="eraInfoHometown">-</span></p>
+                    <p>主要城市：<span id="eraInfoMainCity">-</span></p>
+                </div>
+                <div class="era-memories-content" id="eraMemoriesContent">
+                    <p class="loading-text">加载中...</p>
+                </div>
+                <div class="era-memories-actions">
+                    <button class="btn btn-secondary" id="regenerateBtn" onclick="regenerateEraMemories()">重新生成</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 话题选择弹窗 -->
+    <div class="modal" id="topicModal" style="display: none;">
+        <div class="modal-content topic-modal">
+            <div class="modal-header">
+                <h2 id="topicModalTitle">今天想聊点什么？</h2>
+                <button class="btn-close" onclick="closeTopicModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="topic-options" id="topicOptions">
+                    <p class="loading-text">加载中...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 选择记录师弹窗 -->
+    <div class="modal" id="recorderModal" style="display: none;">
+        <div class="modal-content recorder-modal">
+            <div class="modal-header">
+                <h2>选择您的人生记录师</h2>
+                <button class="btn-close" onclick="closeRecorderModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="recorder-options">
+                    <div class="recorder-card" id="recorderFemale" onclick="selectRecorder('female')">
+                        <div class="recorder-avatar">
+                            <img src="assets/忆安.png" alt="忆安">
+                        </div>
+                        <div class="recorder-name">忆安</div>
+                        <div class="recorder-desc">温柔细腻，善于倾听</div>
+                    </div>
+                    <div class="recorder-card" id="recorderMale" onclick="selectRecorder('male')">
+                        <div class="recorder-avatar">
+                            <img src="assets/言川.png" alt="言川">
+                        </div>
+                        <div class="recorder-name">言川</div>
+                        <div class="recorder-desc">沉稳耐心，娓娓道来</div>
+                    </div>
+                </div>
+                <div class="recorder-actions">
+                    <button class="btn btn-primary" onclick="confirmRecorder()">确认选择</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 修改密码弹窗 -->
+    <div class="modal" id="changePasswordModal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>修改密码</h2>
+                <button class="btn-close" onclick="closeChangePassword()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #555;">旧密码</label>
+                    <input type="password" id="oldPassword" class="form-input" placeholder="请输入旧密码" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box;">
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #555;">新密码</label>
+                    <input type="password" id="newPassword" class="form-input" placeholder="请输入新密码（至少6位）" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box;">
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 14px; color: #555;">确认新密码</label>
+                    <input type="password" id="confirmPassword" class="form-input" placeholder="请再次输入新密码" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; box-sizing: border-box;">
+                </div>
+                <button class="btn btn-primary" onclick="submitChangePassword()" style="width: 100%;">确认修改</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        window.onload = function() {
+            initApp();
+        };
+
+        // 点击页面其他地方关闭下拉菜单
+        document.addEventListener('click', function(e) {
+            const dropdown = document.getElementById('userDropdown');
+            const menuBtn = document.querySelector('.menu-btn');
+            if (!menuBtn.contains(e.target) && !dropdown.contains(e.target)) {
+                dropdown.classList.remove('show');
+            }
+        });
+
+        // 点击弹窗外部关闭弹窗
+        document.getElementById('recorderModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeRecorderModal();
+            }
+        });
+
+        document.getElementById('eraMemoriesModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeEraMemoriesModal();
+            }
+        });
+
+        document.getElementById('topicModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTopicModal();
+            }
+        });
+
+        document.getElementById('changePasswordModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeChangePassword();
+            }
+        });
+    </script>
+</body>
+</html>
