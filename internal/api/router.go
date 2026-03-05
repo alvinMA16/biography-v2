@@ -12,18 +12,20 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
+	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
 // RouterDeps 路由依赖
 type RouterDeps struct {
-	Config      *config.Config
-	DB          *postgres.DB
-	LLMManager  *llm.Manager
-	ASRProvider asr.Provider
-	TTSProvider tts.Provider
-	UserService *userService.Service
+	Config              *config.Config
+	DB                  *postgres.DB
+	LLMManager          *llm.Manager
+	ASRProvider         asr.Provider
+	TTSProvider         tts.Provider
+	UserService         *userService.Service
+	ConversationService *convService.Service
 }
 
 // NewRouter 创建路由
@@ -48,7 +50,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	})
 
 	// 创建 User Handler
-	userHandler := user.NewHandler(deps.UserService)
+	userHandler := user.NewHandler(deps.UserService, deps.ConversationService)
 
 	// API 路由组
 	api := r.Group("/api")

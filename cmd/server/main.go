@@ -18,7 +18,9 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/llm/gemini"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	"github.com/peizhengma/biography-v2/internal/provider/tts/doubao"
+	convRepo "github.com/peizhengma/biography-v2/internal/repository/conversation"
 	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
+	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
@@ -49,14 +51,18 @@ func main() {
 		JWTExpireDays: cfg.JWTExpireDays,
 	})
 
+	convRepository := convRepo.New(db.Pool())
+	convSvc := convService.New(convRepository)
+
 	// 初始化路由
 	router := api.NewRouter(&api.RouterDeps{
-		Config:      cfg,
-		DB:          db,
-		LLMManager:  llmManager,
-		ASRProvider: asrProvider,
-		TTSProvider: ttsProvider,
-		UserService: userSvc,
+		Config:              cfg,
+		DB:                  db,
+		LLMManager:          llmManager,
+		ASRProvider:         asrProvider,
+		TTSProvider:         ttsProvider,
+		UserService:         userSvc,
+		ConversationService: convSvc,
 	})
 
 	// 创建 HTTP 服务器

@@ -3,23 +3,28 @@ package user
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/peizhengma/biography-v2/internal/domain/conversation"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
+	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 )
 
 // Handler 用户 API 处理器
 type Handler struct {
 	userService *userService.Service
+	convService *convService.Service
 }
 
 // NewHandler 创建 Handler
-func NewHandler(userSvc *userService.Service) *Handler {
+func NewHandler(userSvc *userService.Service, convSvc *convService.Service) *Handler {
 	return &Handler{
 		userService: userSvc,
+		convService: convSvc,
 	}
 }
 
@@ -171,31 +176,135 @@ func getUserID(c *gin.Context) uuid.UUID {
 	}
 }
 
-// --- 以下是需要其他 Service 实现的接口，暂时保留 TODO ---
+// ============================================
+// 对话相关接口
+// ============================================
 
 // ListConversations 获取对话列表
 func (h *Handler) ListConversations(c *gin.Context) {
-	// TODO: 需要 ConversationService
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// 解析分页参数
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	// 解析状态过滤
+	var status *conversation.Status
+	if s := c.Query("status"); s != "" {
+		st := conversation.Status(s)
+		status = &st
+	}
+
+	conversations, total, err := h.convService.List(c.Request.Context(), userID, status, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"conversations": conversations,
+		"total":         total,
+		"limit":         limit,
+		"offset":        offset,
+	})
 }
 
 // CreateConversation 创建对话
 func (h *Handler) CreateConversation(c *gin.Context) {
-	// TODO: 需要 ConversationService
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	var input conversation.CreateConversationInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	conv, err := h.convService.Create(c.Request.Context(), userID, &input)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, conv)
 }
 
 // GetConversation 获取对话详情
 func (h *Handler) GetConversation(c *gin.Context) {
-	// TODO: 需要 ConversationService
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		return
+	}
+
+	conv, err := h.convService.GetWithMessages(c.Request.Context(), convID, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, convService.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, convService.ErrNotOwner) {
+			status = http.StatusForbidden
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, conv)
 }
 
 // GetMessages 获取对话消息
 func (h *Handler) GetMessages(c *gin.Context) {
-	// TODO: 需要 ConversationService
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		return
+	}
+
+	// 解析分页参数
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	messages, err := h.convService.GetMessages(c.Request.Context(), convID, userID, limit, offset)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, convService.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, convService.ErrNotOwner) {
+			status = http.StatusForbidden
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"messages": messages,
+		"limit":    limit,
+		"offset":   offset,
+	})
 }
+
+// ============================================
+// 回忆录和话题（待实现）
+// ============================================
 
 // ListMemoirs 获取回忆录列表
 func (h *Handler) ListMemoirs(c *gin.Context) {
