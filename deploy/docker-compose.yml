@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-biography}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-biography}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-biography} -d ${POSTGRES_DB:-biography}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PORT: 8000
+      ENV: ${ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-biography}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-biography}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-30}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+
+      # LLM
+      LLM_PROVIDER_DEFAULT: ${LLM_PROVIDER_DEFAULT:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_PROXY: ${GEMINI_PROXY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+
+      # ASR (阿里云)
+      ALIYUN_ACCESS_KEY_ID: ${ALIYUN_ACCESS_KEY_ID:-}
+      ALIYUN_ACCESS_KEY_SECRET: ${ALIYUN_ACCESS_KEY_SECRET:-}
+      ALIYUN_ASR_APP_KEY: ${ALIYUN_ASR_APP_KEY:-}
+
+      # TTS (豆包)
+      DOUBAO_APP_ID: ${DOUBAO_APP_ID:-}
+      DOUBAO_ACCESS_KEY: ${DOUBAO_ACCESS_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
