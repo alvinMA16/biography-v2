@@ -97,6 +97,13 @@ const (
 	EraMemoriesStatusFailed     = "failed"     // 失败
 )
 
+// UserWithStats 用户信息 + 统计数据（用于管理员列表）
+type UserWithStats struct {
+	User
+	ConversationCount int `json:"conversation_count"`
+	MemoirCount       int `json:"memoir_count"`
+}
+
 // AdminCreateInput 管理员创建用户输入
 type AdminCreateInput struct {
 	Phone     string  `json:"phone" binding:"required"`

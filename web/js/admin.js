@@ -27,8 +27,8 @@ async function adminRequest(endpoint, options = {}) {
     }
     const response = await fetch(url, { ...options, headers });
     if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: '请求失败' }));
-        throw new Error(err.detail || '请求失败');
+        const err = await response.json().catch(() => ({ error: '请求失败' }));
+        throw new Error(err.error || err.detail || '请求失败');
     }
     return response.json();
 }
@@ -102,9 +102,9 @@ function switchTab(tab) {
 // ========== 用户列表 ==========
 
 async function loadUsers() {
-    const users = await adminRequest('/admin/users');
-    usersData = users;
-    renderUserTable(users);
+    const data = await adminRequest('/admin/users');
+    usersData = data.users || [];
+    renderUserTable(usersData);
 }
 
 function renderUserTable(users) {
@@ -123,7 +123,7 @@ function renderUserTable(users) {
             <td>${u.birth_year || '<span class="text-muted">-</span>'}</td>
             <td><span class="admin-badge ${u.profile_completed ? 'badge-yes' : 'badge-no'}">${u.profile_completed ? '已完成' : '未完成'}</span></td>
             <td><span class="admin-badge ${isActive ? 'badge-yes' : 'badge-no'}">${isActive ? '正常' : '已禁用'}</span></td>
-            <td>${u.conversation_count} / ${u.memoir_count}</td>
+            <td>${u.conversation_count ?? 0} / ${u.memoir_count ?? 0}</td>
             <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('zh-CN') : '-'}</td>
             <td class="admin-actions-cell">
                 <button class="admin-btn admin-btn-sm admin-btn-primary" onclick="viewUserDetail('${u.id}')">详情</button>
@@ -154,9 +154,9 @@ const ACTION_LABELS = {
 
 async function loadLogs() {
     try {
-        const logs = await adminRequest('/admin/logs');
+        const data = await adminRequest('/admin/logs');
         logsLoaded = true;
-        renderLogTable(logs);
+        renderLogTable(data.audit_logs || []);
     } catch (e) {
         document.getElementById('logTableBody').innerHTML =
             '<tr><td colspan="4" class="admin-table-empty">加载失败</td></tr>';

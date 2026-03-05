@@ -4,8 +4,6 @@
 const urlParams = new URLSearchParams(window.location.search);
 const DEBUG_MODE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || urlParams.get('debug') === '1';
 
-// 增强模式检测 - 通过 URL 参数或 localStorage 控制
-const ENHANCED_MODE = urlParams.get('enhanced') === '1' || storage.get('useEnhancedMode') === 'true';
 
 let conversationId = null;
 let isProfileCollectionMode = false;  // 是否是信息收集模式
@@ -153,23 +151,12 @@ async function connectWebSocket() {
         params.set('context', selectedContext);
     }
 
-    // 根据模式选择端点
-    const endpoint = ENHANCED_MODE ? '/api/realtime-enhanced/dialog' : '/api/realtime/dialog';
-    const wsUrl = `${wsProtocol}://${window.location.host}${endpoint}?${params.toString()}`;
+    const wsUrl = `${wsProtocol}://${window.location.host}/api/realtime/dialog?${params.toString()}`;
 
     if (DEBUG_MODE) {
         console.log('连接 WebSocket:', wsUrl);
-        console.log('  - 模式:', ENHANCED_MODE ? '增强模式' : '普通模式');
         console.log('  - 记录师:', recorderInfo.name);
         console.log('  - 开场白:', selectedGreeting ? '自定义' : '默认');
-    }
-
-    // Debug 模式下显示干预容器
-    if (DEBUG_MODE && ENHANCED_MODE) {
-        const container = document.getElementById('interventionContainer');
-        if (container) {
-            container.style.display = 'flex';
-        }
     }
 
     try {
@@ -268,10 +255,6 @@ function handleServerMessage(message) {
             break;
 
         case 'intervention':
-            // 干预状态通知 - 仅在 debug + 增强模式下显示
-            if (DEBUG_MODE && ENHANCED_MODE) {
-                showInterventionBubble(message.triggered, message.guidance, message.type_label, message.mechanism, message.timeout, message.timed_out);
-            }
             break;
     }
 }

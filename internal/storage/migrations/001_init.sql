@@ -6,7 +6,7 @@
 -- ============================================
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    phone VARCHAR(20) UNIQUE NOT NULL,
+    phone VARCHAR(20) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
 
     -- 基本信息
@@ -27,7 +27,7 @@ CREATE TABLE users (
     deleted_at TIMESTAMP WITH TIME ZONE  -- 软删除
 );
 
-CREATE INDEX idx_users_phone ON users(phone) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_users_phone ON users(phone) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_deleted_at ON users(deleted_at);
 
 -- ============================================

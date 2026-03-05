@@ -265,7 +265,7 @@ func (r *Repository) SoftDelete(ctx context.Context, id uuid.UUID) error {
 }
 
 // List 获取用户列表（管理端使用）
-func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User, int, error) {
+func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.UserWithStats, int, error) {
 	// 获取总数
 	countQuery := `SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`
 	var total int
@@ -273,15 +273,19 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User,
 		return nil, 0, err
 	}
 
-	// 获取列表
+	// 获取列表（含对话数和回忆录数）
 	query := `
-		SELECT id, phone, password_hash, nickname, preferred_name, gender,
-		       birth_year, hometown, main_city, profile_completed, era_memories,
-		       era_memories_status, is_admin, is_active, settings,
-		       created_at, updated_at, deleted_at
-		FROM users
-		WHERE deleted_at IS NULL
-		ORDER BY created_at DESC
+		SELECT u.id, u.phone, u.password_hash, u.nickname, u.preferred_name, u.gender,
+		       u.birth_year, u.hometown, u.main_city, u.profile_completed, u.era_memories,
+		       u.era_memories_status, u.is_admin, u.is_active, u.settings,
+		       u.created_at, u.updated_at, u.deleted_at,
+		       COALESCE(c.cnt, 0) AS conversation_count,
+		       COALESCE(m.cnt, 0) AS memoir_count
+		FROM users u
+		LEFT JOIN (SELECT user_id, COUNT(*) AS cnt FROM conversations GROUP BY user_id) c ON c.user_id = u.id
+		LEFT JOIN (SELECT user_id, COUNT(*) AS cnt FROM memoirs WHERE deleted_at IS NULL GROUP BY user_id) m ON m.user_id = u.id
+		WHERE u.deleted_at IS NULL
+		ORDER BY u.created_at DESC
 		LIMIT $1 OFFSET $2
 	`
 
@@ -291,9 +295,9 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User,
 	}
 	defer rows.Close()
 
-	var users []*user.User
+	var users []*user.UserWithStats
 	for rows.Next() {
-		var u user.User
+		var u user.UserWithStats
 		err := rows.Scan(
 			&u.ID,
 			&u.Phone,
@@ -313,6 +317,8 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 			&u.DeletedAt,
+			&u.ConversationCount,
+			&u.MemoirCount,
 		)
 		if err != nil {
 			return nil, 0, err

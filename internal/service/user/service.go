@@ -240,7 +240,7 @@ func (s *Service) UpdateEraMemoriesStatus(ctx context.Context, userID uuid.UUID,
 // ============================================
 
 // AdminList 获取用户列表（管理员）
-func (s *Service) AdminList(ctx context.Context, limit, offset int) ([]*user.User, int, error) {
+func (s *Service) AdminList(ctx context.Context, limit, offset int) ([]*user.UserWithStats, int, error) {
 	if limit <= 0 {
 		limit = 20
 	}
