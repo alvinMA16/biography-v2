@@ -23,6 +23,7 @@ import (
 	topicRepo "github.com/peizhengma/biography-v2/internal/repository/topic"
 	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
@@ -64,6 +65,9 @@ func main() {
 	topicRepository := topicRepo.New(db.Pool())
 	topicSvc := topicService.New(topicRepository)
 
+	// 初始化 LLM Service
+	llmSvc := llmService.New(llmManager)
+
 	// 初始化路由
 	router := api.NewRouter(&api.RouterDeps{
 		Config:              cfg,
@@ -75,6 +79,7 @@ func main() {
 		ConversationService: convSvc,
 		MemoirService:       memoirSvc,
 		TopicService:        topicSvc,
+		LLMService:          llmSvc,
 	})
 
 	// 创建 HTTP 服务器

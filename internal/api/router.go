@@ -13,6 +13,7 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
@@ -30,6 +31,7 @@ type RouterDeps struct {
 	ConversationService *convService.Service
 	MemoirService       *memoirService.Service
 	TopicService        *topicService.Service
+	LLMService          *llmService.Service
 }
 
 // NewRouter 创建路由
