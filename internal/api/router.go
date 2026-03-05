@@ -13,6 +13,8 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
@@ -26,6 +28,8 @@ type RouterDeps struct {
 	TTSProvider         tts.Provider
 	UserService         *userService.Service
 	ConversationService *convService.Service
+	MemoirService       *memoirService.Service
+	TopicService        *topicService.Service
 }
 
 // NewRouter 创建路由
@@ -50,7 +54,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	})
 
 	// 创建 User Handler
-	userHandler := user.NewHandler(deps.UserService, deps.ConversationService)
+	userHandler := user.NewHandler(deps.UserService, deps.ConversationService, deps.MemoirService, deps.TopicService)
 
 	// API 路由组
 	api := r.Group("/api")

@@ -19,8 +19,12 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	"github.com/peizhengma/biography-v2/internal/provider/tts/doubao"
 	convRepo "github.com/peizhengma/biography-v2/internal/repository/conversation"
+	memoirRepo "github.com/peizhengma/biography-v2/internal/repository/memoir"
+	topicRepo "github.com/peizhengma/biography-v2/internal/repository/topic"
 	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
@@ -54,6 +58,12 @@ func main() {
 	convRepository := convRepo.New(db.Pool())
 	convSvc := convService.New(convRepository)
 
+	memoirRepository := memoirRepo.New(db.Pool())
+	memoirSvc := memoirService.New(memoirRepository)
+
+	topicRepository := topicRepo.New(db.Pool())
+	topicSvc := topicService.New(topicRepository)
+
 	// 初始化路由
 	router := api.NewRouter(&api.RouterDeps{
 		Config:              cfg,
@@ -63,6 +73,8 @@ func main() {
 		TTSProvider:         ttsProvider,
 		UserService:         userSvc,
 		ConversationService: convSvc,
+		MemoirService:       memoirSvc,
+		TopicService:        topicSvc,
 	})
 
 	// 创建 HTTP 服务器

@@ -11,20 +11,26 @@ import (
 	"github.com/peizhengma/biography-v2/internal/domain/conversation"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 )
 
 // Handler 用户 API 处理器
 type Handler struct {
-	userService *userService.Service
-	convService *convService.Service
+	userService   *userService.Service
+	convService   *convService.Service
+	memoirService *memoirService.Service
+	topicService  *topicService.Service
 }
 
 // NewHandler 创建 Handler
-func NewHandler(userSvc *userService.Service, convSvc *convService.Service) *Handler {
+func NewHandler(userSvc *userService.Service, convSvc *convService.Service, memoirSvc *memoirService.Service, topicSvc *topicService.Service) *Handler {
 	return &Handler{
-		userService: userSvc,
-		convService: convSvc,
+		userService:   userSvc,
+		convService:   convSvc,
+		memoirService: memoirSvc,
+		topicService:  topicSvc,
 	}
 }
 
@@ -308,18 +314,77 @@ func (h *Handler) GetMessages(c *gin.Context) {
 
 // ListMemoirs 获取回忆录列表
 func (h *Handler) ListMemoirs(c *gin.Context) {
-	// TODO: 需要 MemoirService
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// 解析分页参数
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	memoirs, total, err := h.memoirService.List(c.Request.Context(), userID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"memoirs": memoirs,
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+	})
 }
 
 // GetMemoir 获取回忆录详情
 func (h *Handler) GetMemoir(c *gin.Context) {
-	// TODO: 需要 MemoirService
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	memoirID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memoir id"})
+		return
+	}
+
+	m, err := h.memoirService.GetByIDForUser(c.Request.Context(), memoirID, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, memoirService.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, memoirService.ErrNotOwner) {
+			status = http.StatusForbidden
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, m)
 }
 
 // GetTopicOptions 获取话题选项
 func (h *Handler) GetTopicOptions(c *gin.Context) {
-	// TODO: 需要 TopicService
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// 解析数量参数
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "8"))
+
+	options, err := h.topicService.GetTopicOptions(c.Request.Context(), userID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"topics": options,
+	})
 }
