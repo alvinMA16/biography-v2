@@ -21,8 +21,11 @@ type User struct {
 	MainCity      *string `json:"main_city" db:"main_city"`
 
 	// 状态
-	ProfileCompleted bool    `json:"profile_completed" db:"profile_completed"`
-	EraMemories      *string `json:"era_memories" db:"era_memories"`
+	ProfileCompleted  bool    `json:"profile_completed" db:"profile_completed"`
+	EraMemories       *string `json:"era_memories" db:"era_memories"`
+	EraMemoriesStatus string  `json:"era_memories_status" db:"era_memories_status"` // none/pending/generating/completed/failed
+	IsAdmin           bool    `json:"is_admin" db:"is_admin"`
+	IsActive          bool    `json:"is_active" db:"is_active"`
 
 	// 时间戳
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
@@ -79,4 +82,21 @@ type AdminUpdateInput struct {
 	Hometown         *string `json:"hometown"`
 	MainCity         *string `json:"main_city"`
 	ProfileCompleted *bool   `json:"profile_completed"`
+	IsActive         *bool   `json:"is_active"`
+}
+
+// EraMemoriesStatus 时代记忆状态常量
+const (
+	EraMemoriesStatusNone       = "none"       // 未收集基础信息
+	EraMemoriesStatusPending    = "pending"    // 等待生成
+	EraMemoriesStatusGenerating = "generating" // 生成中
+	EraMemoriesStatusCompleted  = "completed"  // 已完成
+	EraMemoriesStatusFailed     = "failed"     // 失败
+)
+
+// AdminCreateInput 管理员创建用户输入
+type AdminCreateInput struct {
+	Phone    string  `json:"phone" binding:"required"`
+	Password string  `json:"password" binding:"required,min=6"`
+	Nickname *string `json:"nickname"`
 }

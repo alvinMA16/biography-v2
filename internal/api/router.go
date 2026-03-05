@@ -13,8 +13,10 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	eraService "github.com/peizhengma/biography-v2/internal/service/era"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
@@ -34,6 +36,8 @@ type RouterDeps struct {
 	TopicService        *topicService.Service
 	QuoteService        *quoteService.Service
 	LLMService          *llmService.Service
+	EraService          *eraService.Service
+	PresetService       *presetService.Service
 }
 
 // NewRouter 创建路由
@@ -117,6 +121,8 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		deps.TopicService,
 		deps.QuoteService,
 		deps.LLMService,
+		deps.EraService,
+		deps.PresetService,
 	)
 
 	// 管理端路由（需要 Admin API Key）
@@ -159,6 +165,18 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		// TTS Provider 管理
 		adminRoutes.GET("/tts/voices", adminHandler.GetTTSVoices)
 		adminRoutes.POST("/tts/test", adminHandler.TestTTS)
+
+		// 时代记忆预设管理
+		adminRoutes.GET("/era-memories", adminHandler.ListEraMemories)
+		adminRoutes.POST("/era-memories", adminHandler.CreateEraMemory)
+		adminRoutes.PUT("/era-memories/:id", adminHandler.UpdateEraMemory)
+		adminRoutes.DELETE("/era-memories/:id", adminHandler.DeleteEraMemory)
+
+		// 预设话题管理
+		adminRoutes.GET("/preset-topics", adminHandler.ListPresetTopics)
+		adminRoutes.POST("/preset-topics", adminHandler.CreatePresetTopic)
+		adminRoutes.PUT("/preset-topics/:id", adminHandler.UpdatePresetTopic)
+		adminRoutes.DELETE("/preset-topics/:id", adminHandler.DeletePresetTopic)
 
 		// 系统监控
 		adminRoutes.GET("/monitor/health", adminHandler.HealthCheck)

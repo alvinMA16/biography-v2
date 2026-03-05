@@ -19,13 +19,17 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	"github.com/peizhengma/biography-v2/internal/provider/tts/doubao"
 	convRepo "github.com/peizhengma/biography-v2/internal/repository/conversation"
+	eraRepo "github.com/peizhengma/biography-v2/internal/repository/era"
 	memoirRepo "github.com/peizhengma/biography-v2/internal/repository/memoir"
+	presetRepo "github.com/peizhengma/biography-v2/internal/repository/preset"
 	quoteRepo "github.com/peizhengma/biography-v2/internal/repository/quote"
 	topicRepo "github.com/peizhengma/biography-v2/internal/repository/topic"
 	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	eraService "github.com/peizhengma/biography-v2/internal/service/era"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
@@ -70,6 +74,12 @@ func main() {
 	quoteRepository := quoteRepo.New(db.Pool())
 	quoteSvc := quoteService.New(quoteRepository)
 
+	eraRepository := eraRepo.New(db.Pool())
+	eraSvc := eraService.New(eraRepository)
+
+	presetRepository := presetRepo.New(db.Pool())
+	presetSvc := presetService.New(presetRepository)
+
 	// 初始化 LLM Service
 	llmSvc := llmService.New(llmManager)
 
@@ -86,6 +96,8 @@ func main() {
 		TopicService:        topicSvc,
 		QuoteService:        quoteSvc,
 		LLMService:          llmSvc,
+		EraService:          eraSvc,
+		PresetService:       presetSvc,
 	})
 
 	// 创建 HTTP 服务器

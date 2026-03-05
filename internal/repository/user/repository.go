@@ -58,6 +58,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, err
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
 		       birth_year, hometown, main_city, profile_completed, era_memories,
+		       era_memories_status, is_admin, is_active,
 		       created_at, updated_at, deleted_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
@@ -76,6 +77,9 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, err
 		&u.MainCity,
 		&u.ProfileCompleted,
 		&u.EraMemories,
+		&u.EraMemoriesStatus,
+		&u.IsAdmin,
+		&u.IsActive,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&u.DeletedAt,
@@ -96,6 +100,7 @@ func (r *Repository) GetByPhone(ctx context.Context, phone string) (*user.User, 
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
 		       birth_year, hometown, main_city, profile_completed, era_memories,
+		       era_memories_status, is_admin, is_active,
 		       created_at, updated_at, deleted_at
 		FROM users
 		WHERE phone = $1 AND deleted_at IS NULL
@@ -114,6 +119,9 @@ func (r *Repository) GetByPhone(ctx context.Context, phone string) (*user.User, 
 		&u.MainCity,
 		&u.ProfileCompleted,
 		&u.EraMemories,
+		&u.EraMemoriesStatus,
+		&u.IsAdmin,
+		&u.IsActive,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&u.DeletedAt,
@@ -135,7 +143,7 @@ func (r *Repository) Update(ctx context.Context, u *user.User) error {
 		UPDATE users
 		SET nickname = $2, preferred_name = $3, gender = $4, birth_year = $5,
 		    hometown = $6, main_city = $7, profile_completed = $8, era_memories = $9,
-		    updated_at = $10
+		    era_memories_status = $10, is_active = $11, updated_at = $12
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 
@@ -149,6 +157,8 @@ func (r *Repository) Update(ctx context.Context, u *user.User) error {
 		u.MainCity,
 		u.ProfileCompleted,
 		u.EraMemories,
+		u.EraMemoriesStatus,
+		u.IsActive,
 		time.Now(),
 	)
 
@@ -216,6 +226,7 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User,
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
 		       birth_year, hometown, main_city, profile_completed, era_memories,
+		       era_memories_status, is_admin, is_active,
 		       created_at, updated_at, deleted_at
 		FROM users
 		WHERE deleted_at IS NULL
@@ -244,6 +255,9 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User,
 			&u.MainCity,
 			&u.ProfileCompleted,
 			&u.EraMemories,
+			&u.EraMemoriesStatus,
+			&u.IsAdmin,
+			&u.IsActive,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 			&u.DeletedAt,

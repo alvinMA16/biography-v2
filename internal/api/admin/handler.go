@@ -11,7 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/peizhengma/biography-v2/internal/domain/era"
 	"github.com/peizhengma/biography-v2/internal/domain/memoir"
+	"github.com/peizhengma/biography-v2/internal/domain/preset"
 	"github.com/peizhengma/biography-v2/internal/domain/quote"
 	"github.com/peizhengma/biography-v2/internal/domain/topic"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
@@ -19,8 +21,10 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	eraService "github.com/peizhengma/biography-v2/internal/service/era"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
@@ -37,6 +41,8 @@ type Handler struct {
 	topicService  *topicService.Service
 	quoteService  *quoteService.Service
 	llmService    *llmService.Service
+	eraService    *eraService.Service
+	presetService *presetService.Service
 }
 
 // NewHandler 创建 Admin Handler
@@ -50,6 +56,8 @@ func NewHandler(
 	topicSvc *topicService.Service,
 	quoteSvc *quoteService.Service,
 	llmSvc *llmService.Service,
+	eraSvc *eraService.Service,
+	presetSvc *presetService.Service,
 ) *Handler {
 	return &Handler{
 		llmManager:    llmManager,
@@ -61,6 +69,8 @@ func NewHandler(
 		topicService:  topicSvc,
 		quoteService:  quoteSvc,
 		llmService:    llmSvc,
+		eraService:    eraSvc,
+		presetService: presetSvc,
 	}
 }
 
@@ -122,6 +132,7 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		Hometown         *string `json:"hometown"`
 		MainCity         *string `json:"main_city"`
 		ProfileCompleted *bool   `json:"profile_completed"`
+		IsActive         *bool   `json:"is_active"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -136,6 +147,7 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		Hometown:         input.Hometown,
 		MainCity:         input.MainCity,
 		ProfileCompleted: input.ProfileCompleted,
+		IsActive:         input.IsActive,
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -891,4 +903,180 @@ func (h *Handler) TestTTS(c *gin.Context) {
 		"audio_bytes": len(audio),
 		"latency_ms":  latency,
 	})
+}
+
+// --- 时代记忆预设管理 ---
+
+// ListEraMemories 获取时代记忆预设列表
+func (h *Handler) ListEraMemories(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	var category *string
+	if cat := c.Query("category"); cat != "" {
+		category = &cat
+	}
+
+	memories, total, err := h.eraService.List(c.Request.Context(), category, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"era_memories": memories,
+		"total":        total,
+		"page":         page,
+		"page_size":    pageSize,
+	})
+}
+
+// CreateEraMemory 创建时代记忆预设
+func (h *Handler) CreateEraMemory(c *gin.Context) {
+	var input era.CreateMemoryPresetInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	m, err := h.eraService.Create(c.Request.Context(), &input)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, m)
+}
+
+// UpdateEraMemory 更新时代记忆预设
+func (h *Handler) UpdateEraMemory(c *gin.Context) {
+	memoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memory id"})
+		return
+	}
+
+	var input era.UpdateMemoryPresetInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	m, err := h.eraService.Update(c.Request.Context(), memoryID, &input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, eraService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, m)
+}
+
+// DeleteEraMemory 删除时代记忆预设
+func (h *Handler) DeleteEraMemory(c *gin.Context) {
+	memoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memory id"})
+		return
+	}
+
+	if err := h.eraService.Delete(c.Request.Context(), memoryID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, eraService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "era memory deleted"})
+}
+
+// --- 预设话题管理 ---
+
+// ListPresetTopics 获取预设话题列表
+func (h *Handler) ListPresetTopics(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	activeOnly := c.Query("active_only") == "true"
+
+	topics, total, err := h.presetService.List(c.Request.Context(), activeOnly, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"preset_topics": topics,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+	})
+}
+
+// CreatePresetTopic 创建预设话题
+func (h *Handler) CreatePresetTopic(c *gin.Context) {
+	var input preset.CreateTopicInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	t, err := h.presetService.Create(c.Request.Context(), &input)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, t)
+}
+
+// UpdatePresetTopic 更新预设话题
+func (h *Handler) UpdatePresetTopic(c *gin.Context) {
+	topicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid topic id"})
+		return
+	}
+
+	var input preset.UpdateTopicInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	t, err := h.presetService.Update(c.Request.Context(), topicID, &input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, presetService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, t)
+}
+
+// DeletePresetTopic 删除预设话题
+func (h *Handler) DeletePresetTopic(c *gin.Context) {
+	topicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid topic id"})
+		return
+	}
+
+	if err := h.presetService.Delete(c.Request.Context(), topicID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, presetService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "preset topic deleted"})
 }

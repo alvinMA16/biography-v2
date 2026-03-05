@@ -271,6 +271,9 @@ func (s *Service) AdminUpdate(ctx context.Context, userID uuid.UUID, input *user
 	if input.ProfileCompleted != nil {
 		u.ProfileCompleted = *input.ProfileCompleted
 	}
+	if input.IsActive != nil {
+		u.IsActive = *input.IsActive
+	}
 
 	u.ProfileCompleted = isProfileCompleted(u)
 
