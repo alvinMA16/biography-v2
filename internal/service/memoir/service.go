@@ -163,6 +163,11 @@ func (s *Service) ListAll(ctx context.Context, userID uuid.UUID) ([]*memoir.Memo
 	return s.repo.ListByUserID(ctx, userID)
 }
 
+// ListByUserID 获取用户所有回忆录
+func (s *Service) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*memoir.Memoir, error) {
+	return s.repo.ListByUserID(ctx, userID)
+}
+
 // GetByConversationID 根据对话 ID 获取回忆录
 func (s *Service) GetByConversationID(ctx context.Context, conversationID uuid.UUID) (*memoir.Memoir, error) {
 	m, err := s.repo.GetByConversationID(ctx, conversationID)

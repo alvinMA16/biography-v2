@@ -18,6 +18,7 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/llm/gemini"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 	"github.com/peizhengma/biography-v2/internal/provider/tts/doubao"
+	auditRepo "github.com/peizhengma/biography-v2/internal/repository/audit"
 	convRepo "github.com/peizhengma/biography-v2/internal/repository/conversation"
 	eraRepo "github.com/peizhengma/biography-v2/internal/repository/era"
 	memoirRepo "github.com/peizhengma/biography-v2/internal/repository/memoir"
@@ -25,14 +26,18 @@ import (
 	quoteRepo "github.com/peizhengma/biography-v2/internal/repository/quote"
 	topicRepo "github.com/peizhengma/biography-v2/internal/repository/topic"
 	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
+	welcomeRepo "github.com/peizhengma/biography-v2/internal/repository/welcome"
+	auditService "github.com/peizhengma/biography-v2/internal/service/audit"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	eraService "github.com/peizhengma/biography-v2/internal/service/era"
+	flowService "github.com/peizhengma/biography-v2/internal/service/flow"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
+	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
@@ -80,8 +85,17 @@ func main() {
 	presetRepository := presetRepo.New(db.Pool())
 	presetSvc := presetService.New(presetRepository)
 
+	welcomeRepository := welcomeRepo.New(db.Pool())
+	welcomeSvc := welcomeService.New(welcomeRepository)
+
+	auditRepository := auditRepo.New(db.Pool())
+	auditSvc := auditService.New(auditRepository)
+
 	// 初始化 LLM Service
 	llmSvc := llmService.New(llmManager)
+
+	// 初始化 Flow Service
+	flowSvc := flowService.New(userSvc, convSvc, memoirSvc, topicSvc, llmSvc)
 
 	// 初始化路由
 	router := api.NewRouter(&api.RouterDeps{
@@ -98,6 +112,9 @@ func main() {
 		LLMService:          llmSvc,
 		EraService:          eraSvc,
 		PresetService:       presetSvc,
+		WelcomeService:      welcomeSvc,
+		AuditService:        auditSvc,
+		FlowService:         flowSvc,
 	})
 
 	// 创建 HTTP 服务器

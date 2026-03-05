@@ -29,14 +29,16 @@ func New(pool *pgxpool.Pool) *Repository {
 // Create 创建对话
 func (r *Repository) Create(ctx context.Context, c *conversation.Conversation) error {
 	query := `
-		INSERT INTO conversations (id, user_id, topic, greeting, context, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO conversations (id, user_id, title, topic, topics, greeting, context, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
 	_, err := r.pool.Exec(ctx, query,
 		c.ID,
 		c.UserID,
+		c.Title,
 		c.Topic,
+		c.Topics,
 		c.Greeting,
 		c.Context,
 		c.Status,
@@ -50,22 +52,25 @@ func (r *Repository) Create(ctx context.Context, c *conversation.Conversation) e
 // GetByID 根据 ID 获取对话
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*conversation.Conversation, error) {
 	query := `
-		SELECT id, user_id, topic, greeting, context, summary, status, created_at, updated_at
+		SELECT id, user_id, title, topic, topics, greeting, context, summary, status, created_at, updated_at, deleted_at
 		FROM conversations
-		WHERE id = $1
+		WHERE id = $1 AND deleted_at IS NULL
 	`
 
 	var c conversation.Conversation
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&c.ID,
 		&c.UserID,
+		&c.Title,
 		&c.Topic,
+		&c.Topics,
 		&c.Greeting,
 		&c.Context,
 		&c.Summary,
 		&c.Status,
 		&c.CreatedAt,
 		&c.UpdatedAt,
+		&c.DeletedAt,
 	)
 
 	if err != nil {
@@ -100,13 +105,15 @@ func (r *Repository) GetByIDWithMessages(ctx context.Context, id uuid.UUID) (*co
 func (r *Repository) Update(ctx context.Context, c *conversation.Conversation) error {
 	query := `
 		UPDATE conversations
-		SET topic = $2, greeting = $3, context = $4, summary = $5, status = $6, updated_at = $7
-		WHERE id = $1
+		SET title = $2, topic = $3, topics = $4, greeting = $5, context = $6, summary = $7, status = $8, updated_at = $9
+		WHERE id = $1 AND deleted_at IS NULL
 	`
 
 	result, err := r.pool.Exec(ctx, query,
 		c.ID,
+		c.Title,
 		c.Topic,
+		c.Topics,
 		c.Greeting,
 		c.Context,
 		c.Summary,
@@ -127,7 +134,7 @@ func (r *Repository) Update(ctx context.Context, c *conversation.Conversation) e
 
 // UpdateStatus 更新对话状态
 func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status conversation.Status) error {
-	query := `UPDATE conversations SET status = $2, updated_at = $3 WHERE id = $1`
+	query := `UPDATE conversations SET status = $2, updated_at = $3 WHERE id = $1 AND deleted_at IS NULL`
 
 	result, err := r.pool.Exec(ctx, query, id, status, time.Now())
 	if err != nil {
@@ -143,9 +150,25 @@ func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status conv
 
 // UpdateSummary 更新对话摘要
 func (r *Repository) UpdateSummary(ctx context.Context, id uuid.UUID, summary string) error {
-	query := `UPDATE conversations SET summary = $2, updated_at = $3 WHERE id = $1`
+	query := `UPDATE conversations SET summary = $2, updated_at = $3 WHERE id = $1 AND deleted_at IS NULL`
 
 	result, err := r.pool.Exec(ctx, query, id, summary, time.Now())
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// SoftDelete 软删除对话
+func (r *Repository) SoftDelete(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE conversations SET deleted_at = $2 WHERE id = $1 AND deleted_at IS NULL`
+
+	result, err := r.pool.Exec(ctx, query, id, time.Now())
 	if err != nil {
 		return err
 	}
@@ -160,7 +183,7 @@ func (r *Repository) UpdateSummary(ctx context.Context, id uuid.UUID, summary st
 // List 获取对话列表
 func (r *Repository) List(ctx context.Context, filter conversation.ListConversationsFilter) ([]*conversation.Conversation, int, error) {
 	// 构建查询条件
-	whereClause := "WHERE user_id = $1"
+	whereClause := "WHERE user_id = $1 AND deleted_at IS NULL"
 	args := []interface{}{filter.UserID}
 	argIndex := 2
 
@@ -179,7 +202,7 @@ func (r *Repository) List(ctx context.Context, filter conversation.ListConversat
 
 	// 获取列表（带消息数量）
 	query := fmt.Sprintf(`
-		SELECT c.id, c.user_id, c.topic, c.greeting, c.context, c.summary, c.status,
+		SELECT c.id, c.user_id, c.title, c.topic, c.topics, c.greeting, c.context, c.summary, c.status,
 		       c.created_at, c.updated_at,
 		       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
 		FROM conversations c
@@ -202,7 +225,9 @@ func (r *Repository) List(ctx context.Context, filter conversation.ListConversat
 		err := rows.Scan(
 			&c.ID,
 			&c.UserID,
+			&c.Title,
 			&c.Topic,
+			&c.Topics,
 			&c.Greeting,
 			&c.Context,
 			&c.Summary,
@@ -222,7 +247,7 @@ func (r *Repository) List(ctx context.Context, filter conversation.ListConversat
 
 // ListAll 获取所有对话（管理端使用）
 func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *conversation.Status, limit, offset int) ([]*conversation.Conversation, int, error) {
-	whereClause := "WHERE 1=1"
+	whereClause := "WHERE deleted_at IS NULL"
 	args := []interface{}{}
 	argIndex := 1
 
@@ -247,7 +272,7 @@ func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *con
 
 	// 获取列表
 	query := fmt.Sprintf(`
-		SELECT c.id, c.user_id, c.topic, c.greeting, c.context, c.summary, c.status,
+		SELECT c.id, c.user_id, c.title, c.topic, c.topics, c.greeting, c.context, c.summary, c.status,
 		       c.created_at, c.updated_at,
 		       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
 		FROM conversations c
@@ -270,7 +295,9 @@ func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *con
 		err := rows.Scan(
 			&c.ID,
 			&c.UserID,
+			&c.Title,
 			&c.Topic,
+			&c.Topics,
 			&c.Greeting,
 			&c.Context,
 			&c.Summary,
@@ -291,9 +318,9 @@ func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *con
 // GetActiveByUserID 获取用户的活跃对话
 func (r *Repository) GetActiveByUserID(ctx context.Context, userID uuid.UUID) (*conversation.Conversation, error) {
 	query := `
-		SELECT id, user_id, topic, greeting, context, summary, status, created_at, updated_at
+		SELECT id, user_id, title, topic, topics, greeting, context, summary, status, created_at, updated_at, deleted_at
 		FROM conversations
-		WHERE user_id = $1 AND status = 'active'
+		WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL
 		ORDER BY created_at DESC
 		LIMIT 1
 	`
@@ -302,13 +329,16 @@ func (r *Repository) GetActiveByUserID(ctx context.Context, userID uuid.UUID) (*
 	err := r.pool.QueryRow(ctx, query, userID).Scan(
 		&c.ID,
 		&c.UserID,
+		&c.Title,
 		&c.Topic,
+		&c.Topics,
 		&c.Greeting,
 		&c.Context,
 		&c.Summary,
 		&c.Status,
 		&c.CreatedAt,
 		&c.UpdatedAt,
+		&c.DeletedAt,
 	)
 
 	if err != nil {

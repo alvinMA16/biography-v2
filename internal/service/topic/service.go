@@ -178,6 +178,14 @@ func (s *Service) GetTopicOptions(ctx context.Context, userID uuid.UUID, limit i
 	return options, nil
 }
 
+// GetAvailableForUser 获取用户的可用话题列表
+func (s *Service) GetAvailableForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*topic.TopicCandidate, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	return s.repo.GetAvailableTopics(ctx, userID, limit)
+}
+
 // Approve 批准话题
 func (s *Service) Approve(ctx context.Context, id, userID uuid.UUID) error {
 	t, err := s.GetByIDForUser(ctx, id, userID)

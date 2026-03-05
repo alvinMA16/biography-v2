@@ -29,8 +29,8 @@ func New(pool *pgxpool.Pool) *Repository {
 // Create 创建回忆录
 func (r *Repository) Create(ctx context.Context, m *memoir.Memoir) error {
 	query := `
-		INSERT INTO memoirs (id, user_id, conversation_id, title, content, time_period, start_year, end_year, sort_order, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO memoirs (id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -39,6 +39,8 @@ func (r *Repository) Create(ctx context.Context, m *memoir.Memoir) error {
 		m.ConversationID,
 		m.Title,
 		m.Content,
+		m.Status,
+		m.SourceConversations,
 		m.TimePeriod,
 		m.StartYear,
 		m.EndYear,
@@ -53,7 +55,7 @@ func (r *Repository) Create(ctx context.Context, m *memoir.Memoir) error {
 // GetByID 根据 ID 获取回忆录
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*memoir.Memoir, error) {
 	query := `
-		SELECT id, user_id, conversation_id, title, content, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
+		SELECT id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
 		FROM memoirs
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -65,6 +67,8 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*memoir.Memoir,
 		&m.ConversationID,
 		&m.Title,
 		&m.Content,
+		&m.Status,
+		&m.SourceConversations,
 		&m.TimePeriod,
 		&m.StartYear,
 		&m.EndYear,
@@ -88,7 +92,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*memoir.Memoir,
 func (r *Repository) Update(ctx context.Context, m *memoir.Memoir) error {
 	query := `
 		UPDATE memoirs
-		SET title = $2, content = $3, time_period = $4, start_year = $5, end_year = $6, sort_order = $7, updated_at = $8
+		SET title = $2, content = $3, status = $4, source_conversations = $5, time_period = $6, start_year = $7, end_year = $8, sort_order = $9, updated_at = $10
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 
@@ -96,6 +100,8 @@ func (r *Repository) Update(ctx context.Context, m *memoir.Memoir) error {
 		m.ID,
 		m.Title,
 		m.Content,
+		m.Status,
+		m.SourceConversations,
 		m.TimePeriod,
 		m.StartYear,
 		m.EndYear,
@@ -103,6 +109,22 @@ func (r *Repository) Update(ctx context.Context, m *memoir.Memoir) error {
 		time.Now(),
 	)
 
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateStatus 更新回忆录状态
+func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status memoir.MemoirStatus) error {
+	query := `UPDATE memoirs SET status = $2, updated_at = $3 WHERE id = $1 AND deleted_at IS NULL`
+
+	result, err := r.pool.Exec(ctx, query, id, status, time.Now())
 	if err != nil {
 		return err
 	}
@@ -141,7 +163,7 @@ func (r *Repository) List(ctx context.Context, filter memoir.ListMemoirsFilter) 
 
 	// 获取列表
 	query := `
-		SELECT id, user_id, conversation_id, title, content, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
+		SELECT id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
 		FROM memoirs
 		WHERE user_id = $1 AND deleted_at IS NULL
 		ORDER BY sort_order ASC, start_year ASC NULLS LAST, created_at DESC
@@ -163,6 +185,8 @@ func (r *Repository) List(ctx context.Context, filter memoir.ListMemoirsFilter) 
 			&m.ConversationID,
 			&m.Title,
 			&m.Content,
+			&m.Status,
+			&m.SourceConversations,
 			&m.TimePeriod,
 			&m.StartYear,
 			&m.EndYear,
@@ -183,7 +207,7 @@ func (r *Repository) List(ctx context.Context, filter memoir.ListMemoirsFilter) 
 // ListByUserID 获取用户的所有回忆录（按时间线排序）
 func (r *Repository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*memoir.Memoir, error) {
 	query := `
-		SELECT id, user_id, conversation_id, title, content, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
+		SELECT id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
 		FROM memoirs
 		WHERE user_id = $1 AND deleted_at IS NULL
 		ORDER BY sort_order ASC, start_year ASC NULLS LAST, created_at DESC
@@ -204,6 +228,8 @@ func (r *Repository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*mem
 			&m.ConversationID,
 			&m.Title,
 			&m.Content,
+			&m.Status,
+			&m.SourceConversations,
 			&m.TimePeriod,
 			&m.StartYear,
 			&m.EndYear,
@@ -224,7 +250,7 @@ func (r *Repository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*mem
 // GetByConversationID 根据对话 ID 获取回忆录
 func (r *Repository) GetByConversationID(ctx context.Context, conversationID uuid.UUID) (*memoir.Memoir, error) {
 	query := `
-		SELECT id, user_id, conversation_id, title, content, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
+		SELECT id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
 		FROM memoirs
 		WHERE conversation_id = $1 AND deleted_at IS NULL
 	`
@@ -236,6 +262,8 @@ func (r *Repository) GetByConversationID(ctx context.Context, conversationID uui
 		&m.ConversationID,
 		&m.Title,
 		&m.Content,
+		&m.Status,
+		&m.SourceConversations,
 		&m.TimePeriod,
 		&m.StartYear,
 		&m.EndYear,
@@ -310,7 +338,7 @@ func (r *Repository) ListAll(ctx context.Context, limit, offset int, includeDele
 
 	// 获取列表
 	query := fmt.Sprintf(`
-		SELECT id, user_id, conversation_id, title, content, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
+		SELECT id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
 		FROM memoirs
 		%s
 		ORDER BY created_at DESC
@@ -332,6 +360,8 @@ func (r *Repository) ListAll(ctx context.Context, limit, offset int, includeDele
 			&m.ConversationID,
 			&m.Title,
 			&m.Content,
+			&m.Status,
+			&m.SourceConversations,
 			&m.TimePeriod,
 			&m.StartYear,
 			&m.EndYear,

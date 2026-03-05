@@ -12,14 +12,17 @@ import (
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
+	auditService "github.com/peizhengma/biography-v2/internal/service/audit"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	eraService "github.com/peizhengma/biography-v2/internal/service/era"
+	flowService "github.com/peizhengma/biography-v2/internal/service/flow"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
+	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
@@ -38,6 +41,9 @@ type RouterDeps struct {
 	LLMService          *llmService.Service
 	EraService          *eraService.Service
 	PresetService       *presetService.Service
+	WelcomeService      *welcomeService.Service
+	AuditService        *auditService.Service
+	FlowService         *flowService.Service
 }
 
 // NewRouter 创建路由
@@ -62,7 +68,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	})
 
 	// 创建 User Handler
-	userHandler := user.NewHandler(deps.UserService, deps.ConversationService, deps.MemoirService, deps.TopicService)
+	userHandler := user.NewHandler(deps.UserService, deps.ConversationService, deps.MemoirService, deps.TopicService, deps.FlowService, deps.LLMService)
 
 	// API 路由组
 	api := r.Group("/api")
@@ -79,16 +85,24 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		userRoutes.GET("/user/profile", userHandler.GetProfile)
 		userRoutes.PUT("/user/profile", userHandler.UpdateProfile)
 		userRoutes.PUT("/user/password", userHandler.ChangePassword)
+		userRoutes.POST("/user/era-memories", userHandler.GenerateEraMemories)
+		userRoutes.GET("/user/era-memories", userHandler.GetEraMemoriesStatus)
+		userRoutes.GET("/user/export", userHandler.ExportUserData)
+		userRoutes.DELETE("/user/account", userHandler.DeleteAccount)
 
 		// 对话
 		userRoutes.GET("/conversations", userHandler.ListConversations)
 		userRoutes.POST("/conversations", userHandler.CreateConversation)
 		userRoutes.GET("/conversations/:id", userHandler.GetConversation)
 		userRoutes.GET("/conversations/:id/messages", userHandler.GetMessages)
+		userRoutes.POST("/conversations/:id/end", userHandler.EndConversation)
+		userRoutes.POST("/conversations/:id/end-quick", userHandler.EndConversationQuick)
 
 		// 回忆录
 		userRoutes.GET("/memoirs", userHandler.ListMemoirs)
 		userRoutes.GET("/memoirs/:id", userHandler.GetMemoir)
+		userRoutes.PUT("/memoirs/:id", userHandler.UpdateMemoir)
+		userRoutes.DELETE("/memoirs/:id", userHandler.DeleteMemoir)
 
 		// 话题
 		userRoutes.GET("/topics", userHandler.GetTopicOptions)
@@ -123,6 +137,8 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		deps.LLMService,
 		deps.EraService,
 		deps.PresetService,
+		deps.WelcomeService,
+		deps.AuditService,
 	)
 
 	// 管理端路由（需要 Admin API Key）
@@ -132,8 +148,11 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		// 用户管理
 		adminRoutes.GET("/users", adminHandler.ListUsers)
 		adminRoutes.GET("/users/:id", adminHandler.GetUser)
+		adminRoutes.GET("/users/:id/stats", adminHandler.GetUserStats)
 		adminRoutes.PUT("/users/:id", adminHandler.UpdateUser)
 		adminRoutes.DELETE("/users/:id", adminHandler.DeleteUser)
+		adminRoutes.POST("/users/:id/reset-password", adminHandler.ResetPassword)
+		adminRoutes.POST("/users/:id/toggle-active", adminHandler.ToggleUserActive)
 
 		// 对话管理
 		adminRoutes.GET("/conversations", adminHandler.ListConversations)
@@ -177,6 +196,15 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		adminRoutes.POST("/preset-topics", adminHandler.CreatePresetTopic)
 		adminRoutes.PUT("/preset-topics/:id", adminHandler.UpdatePresetTopic)
 		adminRoutes.DELETE("/preset-topics/:id", adminHandler.DeletePresetTopic)
+
+		// 欢迎语管理
+		adminRoutes.GET("/welcome-messages", adminHandler.ListWelcomeMessages)
+		adminRoutes.POST("/welcome-messages", adminHandler.CreateWelcomeMessage)
+		adminRoutes.PUT("/welcome-messages/:id", adminHandler.UpdateWelcomeMessage)
+		adminRoutes.DELETE("/welcome-messages/:id", adminHandler.DeleteWelcomeMessage)
+
+		// 审计日志
+		adminRoutes.GET("/logs", adminHandler.ListAuditLogs)
 
 		// 系统监控
 		adminRoutes.GET("/monitor/health", adminHandler.HealthCheck)

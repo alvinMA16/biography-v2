@@ -21,17 +21,20 @@ type Conversation struct {
 	UserID uuid.UUID `json:"user_id" db:"user_id"`
 
 	// 对话信息
-	Topic    *string `json:"topic" db:"topic"`
-	Greeting *string `json:"greeting" db:"greeting"`
-	Context  *string `json:"context" db:"context"`
-	Summary  *string `json:"summary" db:"summary"`
+	Title    *string  `json:"title" db:"title"`
+	Topic    *string  `json:"topic" db:"topic"`
+	Topics   []string `json:"topics" db:"topics"` // 话题标签数组 (JSON)
+	Greeting *string  `json:"greeting" db:"greeting"`
+	Context  *string  `json:"context" db:"context"`
+	Summary  *string  `json:"summary" db:"summary"`
 
 	// 状态
 	Status Status `json:"status" db:"status"`
 
 	// 时间戳
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
+	DeletedAt *time.Time `json:"-" db:"deleted_at"`
 
 	// 关联数据（非数据库字段）
 	Messages     []Message `json:"messages,omitempty" db:"-"`

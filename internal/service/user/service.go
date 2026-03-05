@@ -225,6 +225,16 @@ func (s *Service) GetByID(ctx context.Context, userID uuid.UUID) (*user.User, er
 	return s.GetProfile(ctx, userID)
 }
 
+// UpdateEraMemories 更新时代记忆
+func (s *Service) UpdateEraMemories(ctx context.Context, userID uuid.UUID, eraMemories, status string) error {
+	return s.repo.UpdateEraMemories(ctx, userID, eraMemories, status)
+}
+
+// UpdateEraMemoriesStatus 更新时代记忆状态
+func (s *Service) UpdateEraMemoriesStatus(ctx context.Context, userID uuid.UUID, status string) error {
+	return s.repo.UpdateEraMemoriesStatus(ctx, userID, status)
+}
+
 // ============================================
 // Admin 方法
 // ============================================
@@ -294,6 +304,32 @@ func (s *Service) AdminDelete(ctx context.Context, userID uuid.UUID) error {
 		return err
 	}
 	return s.repo.SoftDelete(ctx, userID)
+}
+
+// AdminResetPassword 管理员重置用户密码
+func (s *Service) AdminResetPassword(ctx context.Context, userID uuid.UUID, newPassword string) error {
+	// 验证用户存在
+	_, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, userRepo.ErrNotFound) {
+			return ErrUserNotFound
+		}
+		return err
+	}
+
+	// 验证新密码
+	if len(newPassword) < 6 {
+		return ErrInvalidPassword
+	}
+
+	// 加密新密码
+	passwordHash, err := hashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	// 更新密码
+	return s.repo.UpdatePassword(ctx, userID, passwordHash)
 }
 
 // generateToken 生成 JWT Token

@@ -17,9 +17,11 @@ import (
 	"github.com/peizhengma/biography-v2/internal/domain/quote"
 	"github.com/peizhengma/biography-v2/internal/domain/topic"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
+	"github.com/peizhengma/biography-v2/internal/domain/welcome"
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
+	auditService "github.com/peizhengma/biography-v2/internal/service/audit"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	eraService "github.com/peizhengma/biography-v2/internal/service/era"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
@@ -28,21 +30,24 @@ import (
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
+	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
 )
 
 // Handler Admin API 处理器
 type Handler struct {
-	llmManager    *llm.Manager
-	asrProvider   asr.Provider
-	ttsProvider   tts.Provider
-	userService   *userService.Service
-	convService   *convService.Service
-	memoirService *memoirService.Service
-	topicService  *topicService.Service
-	quoteService  *quoteService.Service
-	llmService    *llmService.Service
-	eraService    *eraService.Service
-	presetService *presetService.Service
+	llmManager     *llm.Manager
+	asrProvider    asr.Provider
+	ttsProvider    tts.Provider
+	userService    *userService.Service
+	convService    *convService.Service
+	memoirService  *memoirService.Service
+	topicService   *topicService.Service
+	quoteService   *quoteService.Service
+	llmService     *llmService.Service
+	eraService     *eraService.Service
+	presetService  *presetService.Service
+	welcomeService *welcomeService.Service
+	auditService   *auditService.Service
 }
 
 // NewHandler 创建 Admin Handler
@@ -58,19 +63,23 @@ func NewHandler(
 	llmSvc *llmService.Service,
 	eraSvc *eraService.Service,
 	presetSvc *presetService.Service,
+	welcomeSvc *welcomeService.Service,
+	auditSvc *auditService.Service,
 ) *Handler {
 	return &Handler{
-		llmManager:    llmManager,
-		asrProvider:   asrProvider,
-		ttsProvider:   ttsProvider,
-		userService:   userSvc,
-		convService:   convSvc,
-		memoirService: memoirSvc,
-		topicService:  topicSvc,
-		quoteService:  quoteSvc,
-		llmService:    llmSvc,
-		eraService:    eraSvc,
-		presetService: presetSvc,
+		llmManager:     llmManager,
+		asrProvider:    asrProvider,
+		ttsProvider:    ttsProvider,
+		userService:    userSvc,
+		convService:    convSvc,
+		memoirService:  memoirSvc,
+		topicService:   topicSvc,
+		quoteService:   quoteSvc,
+		llmService:     llmSvc,
+		eraService:     eraSvc,
+		presetService:  presetSvc,
+		welcomeService: welcomeSvc,
+		auditService:   auditSvc,
 	}
 }
 
@@ -179,6 +188,130 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "user deleted"})
+}
+
+// ResetPassword 重置用户密码
+func (h *Handler) ResetPassword(c *gin.Context) {
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	var input struct {
+		NewPassword string `json:"new_password" binding:"required,min=6"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.userService.AdminResetPassword(c.Request.Context(), userID, input.NewPassword); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, userService.ErrUserNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "password reset successfully"})
+}
+
+// ToggleUserActive 切换用户激活状态
+func (h *Handler) ToggleUserActive(c *gin.Context) {
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	// 获取当前用户状态
+	u, err := h.userService.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, userService.ErrUserNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 切换状态
+	newActive := !u.IsActive
+	u, err = h.userService.AdminUpdate(c.Request.Context(), userID, &user.AdminUpdateInput{
+		IsActive: &newActive,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "user status updated",
+		"is_active": u.IsActive,
+	})
+}
+
+// GetUserStats 获取用户统计信息
+func (h *Handler) GetUserStats(c *gin.Context) {
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 获取用户信息
+	u, err := h.userService.GetByID(ctx, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, userService.ErrUserNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 获取对话数量
+	conversations, totalConv, _ := h.convService.AdminList(ctx, &userID, nil, 1000, 0)
+
+	// 获取回忆录数量
+	memoirCount, _ := h.memoirService.Count(ctx, userID)
+
+	// 获取话题数量
+	availableTopics, _ := h.topicService.GetAvailableCount(ctx, userID)
+	pendingTopics, _ := h.topicService.GetPendingCount(ctx, userID)
+
+	// 统计对话状态
+	activeConv := 0
+	completedConv := 0
+	for _, conv := range conversations {
+		if conv.Status == "active" {
+			activeConv++
+		} else if conv.Status == "completed" {
+			completedConv++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user": u,
+		"stats": gin.H{
+			"conversations": gin.H{
+				"total":     totalConv,
+				"active":    activeConv,
+				"completed": completedConv,
+			},
+			"memoirs": gin.H{
+				"total": memoirCount,
+			},
+			"topics": gin.H{
+				"available": availableTopics,
+				"pending":   pendingTopics,
+			},
+		},
+	})
 }
 
 // --- 对话管理 ---
@@ -1079,4 +1212,110 @@ func (h *Handler) DeletePresetTopic(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "preset topic deleted"})
+}
+
+// --- 欢迎语管理 ---
+
+// ListWelcomeMessages 获取欢迎语列表
+func (h *Handler) ListWelcomeMessages(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	messages, total, err := h.welcomeService.List(c.Request.Context(), limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"welcome_messages": messages,
+		"total":            total,
+		"limit":            limit,
+		"offset":           offset,
+	})
+}
+
+// CreateWelcomeMessage 创建欢迎语
+func (h *Handler) CreateWelcomeMessage(c *gin.Context) {
+	var input welcome.CreateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	m, err := h.welcomeService.Create(c.Request.Context(), &input)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, m)
+}
+
+// UpdateWelcomeMessage 更新欢迎语
+func (h *Handler) UpdateWelcomeMessage(c *gin.Context) {
+	messageID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
+		return
+	}
+
+	var input welcome.UpdateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	m, err := h.welcomeService.Update(c.Request.Context(), messageID, &input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, welcomeService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, m)
+}
+
+// DeleteWelcomeMessage 删除欢迎语
+func (h *Handler) DeleteWelcomeMessage(c *gin.Context) {
+	messageID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
+		return
+	}
+
+	if err := h.welcomeService.Delete(c.Request.Context(), messageID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, welcomeService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "welcome message deleted"})
+}
+
+// --- 审计日志 ---
+
+// ListAuditLogs 获取审计日志列表
+func (h *Handler) ListAuditLogs(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	logs, total, err := h.auditService.List(c.Request.Context(), limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"audit_logs": logs,
+		"total":      total,
+		"limit":      limit,
+		"offset":     offset,
+	})
 }

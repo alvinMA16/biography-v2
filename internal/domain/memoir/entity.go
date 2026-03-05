@@ -6,6 +6,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// MemoirStatus 回忆录状态
+type MemoirStatus string
+
+const (
+	MemoirStatusGenerating MemoirStatus = "generating"
+	MemoirStatusCompleted  MemoirStatus = "completed"
+)
+
 // Memoir 回忆录实体
 type Memoir struct {
 	ID             uuid.UUID  `json:"id" db:"id"`
@@ -15,6 +23,10 @@ type Memoir struct {
 	// 内容
 	Title   string `json:"title" db:"title"`
 	Content string `json:"content" db:"content"`
+
+	// 状态
+	Status              MemoirStatus `json:"status" db:"status"`
+	SourceConversations []uuid.UUID  `json:"source_conversations" db:"source_conversations"` // 来源对话ID数组 (JSON)
 
 	// 时间线信息
 	TimePeriod *string `json:"time_period" db:"time_period"`

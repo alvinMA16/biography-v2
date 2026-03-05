@@ -27,6 +27,9 @@ type User struct {
 	IsAdmin           bool    `json:"is_admin" db:"is_admin"`
 	IsActive          bool    `json:"is_active" db:"is_active"`
 
+	// 设置（JSON）
+	Settings *UserSettings `json:"settings" db:"settings"` // 用户偏好设置
+
 	// 时间戳
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
@@ -99,4 +102,24 @@ type AdminCreateInput struct {
 	Phone    string  `json:"phone" binding:"required"`
 	Password string  `json:"password" binding:"required,min=6"`
 	Nickname *string `json:"nickname"`
+}
+
+// UserSettings 用户偏好设置
+type UserSettings struct {
+	Perspective     string `json:"perspective"`      // first_person(第一人称) / third_person(第三人称)
+	TopicPreference string `json:"topic_preference"` // 话题偏好
+}
+
+// UpdateSettingsInput 更新用户设置输入
+type UpdateSettingsInput struct {
+	Perspective     *string `json:"perspective"`
+	TopicPreference *string `json:"topic_preference"`
+}
+
+// ExportData 用户数据导出结构
+type ExportData struct {
+	Profile       *User                  `json:"profile"`
+	Conversations []map[string]any       `json:"conversations"`
+	Memoirs       []map[string]any       `json:"memoirs"`
+	ExportedAt    string                 `json:"exported_at"`
 }

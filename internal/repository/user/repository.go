@@ -58,7 +58,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, err
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
 		       birth_year, hometown, main_city, profile_completed, era_memories,
-		       era_memories_status, is_admin, is_active,
+		       era_memories_status, is_admin, is_active, settings,
 		       created_at, updated_at, deleted_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
@@ -80,6 +80,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, err
 		&u.EraMemoriesStatus,
 		&u.IsAdmin,
 		&u.IsActive,
+		&u.Settings,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&u.DeletedAt,
@@ -100,7 +101,7 @@ func (r *Repository) GetByPhone(ctx context.Context, phone string) (*user.User, 
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
 		       birth_year, hometown, main_city, profile_completed, era_memories,
-		       era_memories_status, is_admin, is_active,
+		       era_memories_status, is_admin, is_active, settings,
 		       created_at, updated_at, deleted_at
 		FROM users
 		WHERE phone = $1 AND deleted_at IS NULL
@@ -122,6 +123,7 @@ func (r *Repository) GetByPhone(ctx context.Context, phone string) (*user.User, 
 		&u.EraMemoriesStatus,
 		&u.IsAdmin,
 		&u.IsActive,
+		&u.Settings,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&u.DeletedAt,
@@ -143,7 +145,7 @@ func (r *Repository) Update(ctx context.Context, u *user.User) error {
 		UPDATE users
 		SET nickname = $2, preferred_name = $3, gender = $4, birth_year = $5,
 		    hometown = $6, main_city = $7, profile_completed = $8, era_memories = $9,
-		    era_memories_status = $10, is_active = $11, updated_at = $12
+		    era_memories_status = $10, is_active = $11, settings = $12, updated_at = $13
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 
@@ -159,9 +161,58 @@ func (r *Repository) Update(ctx context.Context, u *user.User) error {
 		u.EraMemories,
 		u.EraMemoriesStatus,
 		u.IsActive,
+		u.Settings,
 		time.Now(),
 	)
 
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateSettings 更新用户设置
+func (r *Repository) UpdateSettings(ctx context.Context, id uuid.UUID, settings *user.UserSettings) error {
+	query := `UPDATE users SET settings = $2, updated_at = $3 WHERE id = $1 AND deleted_at IS NULL`
+
+	result, err := r.pool.Exec(ctx, query, id, settings, time.Now())
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateEraMemories 更新时代记忆
+func (r *Repository) UpdateEraMemories(ctx context.Context, id uuid.UUID, eraMemories string, status string) error {
+	query := `UPDATE users SET era_memories = $2, era_memories_status = $3, updated_at = $4 WHERE id = $1 AND deleted_at IS NULL`
+
+	result, err := r.pool.Exec(ctx, query, id, eraMemories, status, time.Now())
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateEraMemoriesStatus 更新时代记忆状态
+func (r *Repository) UpdateEraMemoriesStatus(ctx context.Context, id uuid.UUID, status string) error {
+	query := `UPDATE users SET era_memories_status = $2, updated_at = $3 WHERE id = $1 AND deleted_at IS NULL`
+
+	result, err := r.pool.Exec(ctx, query, id, status, time.Now())
 	if err != nil {
 		return err
 	}
@@ -226,7 +277,7 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User,
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
 		       birth_year, hometown, main_city, profile_completed, era_memories,
-		       era_memories_status, is_admin, is_active,
+		       era_memories_status, is_admin, is_active, settings,
 		       created_at, updated_at, deleted_at
 		FROM users
 		WHERE deleted_at IS NULL
@@ -258,6 +309,7 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.User,
 			&u.EraMemoriesStatus,
 			&u.IsAdmin,
 			&u.IsActive,
+			&u.Settings,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 			&u.DeletedAt,

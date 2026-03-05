@@ -1,16 +1,22 @@
 package user
 
 import (
+	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/peizhengma/biography-v2/internal/domain/conversation"
+	"github.com/peizhengma/biography-v2/internal/domain/memoir"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	flowService "github.com/peizhengma/biography-v2/internal/service/flow"
+	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
@@ -22,15 +28,19 @@ type Handler struct {
 	convService   *convService.Service
 	memoirService *memoirService.Service
 	topicService  *topicService.Service
+	flowService   *flowService.Service
+	llmService    *llmService.Service
 }
 
 // NewHandler 创建 Handler
-func NewHandler(userSvc *userService.Service, convSvc *convService.Service, memoirSvc *memoirService.Service, topicSvc *topicService.Service) *Handler {
+func NewHandler(userSvc *userService.Service, convSvc *convService.Service, memoirSvc *memoirService.Service, topicSvc *topicService.Service, flowSvc *flowService.Service, llmSvc *llmService.Service) *Handler {
 	return &Handler{
 		userService:   userSvc,
 		convService:   convSvc,
 		memoirService: memoirSvc,
 		topicService:  topicSvc,
+		flowService:   flowSvc,
+		llmService:    llmSvc,
 	}
 }
 
@@ -367,6 +377,81 @@ func (h *Handler) GetMemoir(c *gin.Context) {
 	c.JSON(http.StatusOK, m)
 }
 
+// UpdateMemoir 更新回忆录
+func (h *Handler) UpdateMemoir(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	memoirID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memoir id"})
+		return
+	}
+
+	var input struct {
+		Title      *string `json:"title"`
+		Content    *string `json:"content"`
+		TimePeriod *string `json:"time_period"`
+		StartYear  *int    `json:"start_year"`
+		EndYear    *int    `json:"end_year"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	m, err := h.memoirService.Update(c.Request.Context(), memoirID, userID, &memoir.UpdateMemoirInput{
+		Title:      input.Title,
+		Content:    input.Content,
+		TimePeriod: input.TimePeriod,
+		StartYear:  input.StartYear,
+		EndYear:    input.EndYear,
+	})
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, memoirService.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, memoirService.ErrNotOwner) {
+			status = http.StatusForbidden
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, m)
+}
+
+// DeleteMemoir 删除回忆录
+func (h *Handler) DeleteMemoir(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	memoirID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memoir id"})
+		return
+	}
+
+	if err := h.memoirService.Delete(c.Request.Context(), memoirID, userID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, memoirService.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, memoirService.ErrNotOwner) {
+			status = http.StatusForbidden
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "memoir deleted"})
+}
+
 // GetTopicOptions 获取话题选项
 func (h *Handler) GetTopicOptions(c *gin.Context) {
 	userID := getUserID(c)
@@ -387,4 +472,276 @@ func (h *Handler) GetTopicOptions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"topics": options,
 	})
+}
+
+// EndConversation 结束对话（同步处理）
+func (h *Handler) EndConversation(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		return
+	}
+
+	result, err := h.flowService.EndConversation(c.Request.Context(), convID, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, flowService.ErrConversationNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, flowService.ErrNotOwner) {
+			status = http.StatusForbidden
+		} else if errors.Is(err, flowService.ErrAlreadyCompleted) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// EndConversationQuick 快速结束对话（异步处理）
+func (h *Handler) EndConversationQuick(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		return
+	}
+
+	err = h.flowService.EndConversationQuick(c.Request.Context(), convID, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, flowService.ErrConversationNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, flowService.ErrNotOwner) {
+			status = http.StatusForbidden
+		} else if errors.Is(err, flowService.ErrAlreadyCompleted) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "对话已结束，正在后台处理"})
+}
+
+// GenerateEraMemories 生成时代记忆
+func (h *Handler) GenerateEraMemories(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// 获取用户信息
+	u, err := h.userService.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	// 检查是否有出生年份
+	if u.BirthYear == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "birth year is required"})
+		return
+	}
+
+	// 检查状态，避免重复生成
+	if u.EraMemoriesStatus == user.EraMemoriesStatusGenerating {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "era memories is already being generated"})
+		return
+	}
+
+	if u.EraMemoriesStatus == user.EraMemoriesStatusCompleted && u.EraMemories != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":       "completed",
+			"era_memories": *u.EraMemories,
+			"message":      "时代记忆已生成",
+		})
+		return
+	}
+
+	// 更新状态为生成中
+	if err := h.userService.UpdateEraMemoriesStatus(c.Request.Context(), userID, user.EraMemoriesStatusGenerating); err != nil {
+		log.Printf("[EraMemories] 更新状态失败: %v", err)
+	}
+
+	// 启动后台生成
+	go h.generateEraMemoriesAsync(userID, u)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"status":  "generating",
+		"message": "时代记忆生成中，请稍后查询",
+	})
+}
+
+// generateEraMemoriesAsync 异步生成时代记忆
+func (h *Handler) generateEraMemoriesAsync(userID uuid.UUID, u *user.User) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	hometown := ""
+	if u.Hometown != nil {
+		hometown = *u.Hometown
+	}
+	mainCity := ""
+	if u.MainCity != nil {
+		mainCity = *u.MainCity
+	}
+
+	eraMemories, err := h.llmService.GenerateEraMemories(ctx, *u.BirthYear, hometown, mainCity)
+	if err != nil {
+		log.Printf("[EraMemories] 生成失败: %v", err)
+		h.userService.UpdateEraMemoriesStatus(ctx, userID, user.EraMemoriesStatusFailed)
+		return
+	}
+
+	// 保存结果
+	if err := h.userService.UpdateEraMemories(ctx, userID, eraMemories, user.EraMemoriesStatusCompleted); err != nil {
+		log.Printf("[EraMemories] 保存失败: %v", err)
+		h.userService.UpdateEraMemoriesStatus(ctx, userID, user.EraMemoriesStatusFailed)
+		return
+	}
+
+	log.Printf("[EraMemories] 用户 %s 时代记忆生成成功", userID)
+}
+
+// GetEraMemoriesStatus 获取时代记忆状态
+func (h *Handler) GetEraMemoriesStatus(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	u, err := h.userService.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	result := gin.H{
+		"status": u.EraMemoriesStatus,
+	}
+
+	if u.EraMemories != nil {
+		result["era_memories"] = *u.EraMemories
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ExportUserData 导出用户数据
+func (h *Handler) ExportUserData(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// 获取用户信息
+	u, err := h.userService.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	// 获取对话列表
+	conversations, _, err := h.convService.List(c.Request.Context(), userID, nil, 1000, 0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 获取回忆录列表
+	memoirs, _, err := h.memoirService.List(c.Request.Context(), userID, 1000, 0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 构建导出数据
+	exportConvs := make([]map[string]any, len(conversations))
+	for i, conv := range conversations {
+		exportConvs[i] = map[string]any{
+			"id":         conv.ID,
+			"topic":      conv.Topic,
+			"status":     conv.Status,
+			"summary":    conv.Summary,
+			"created_at": conv.CreatedAt,
+		}
+	}
+
+	exportMemoirs := make([]map[string]any, len(memoirs))
+	for i, m := range memoirs {
+		exportMemoirs[i] = map[string]any{
+			"id":          m.ID,
+			"title":       m.Title,
+			"content":     m.Content,
+			"time_period": m.TimePeriod,
+			"start_year":  m.StartYear,
+			"end_year":    m.EndYear,
+			"created_at":  m.CreatedAt,
+		}
+	}
+
+	exportData := &user.ExportData{
+		Profile:       u,
+		Conversations: exportConvs,
+		Memoirs:       exportMemoirs,
+		ExportedAt:    time.Now().Format(time.RFC3339),
+	}
+
+	c.JSON(http.StatusOK, exportData)
+}
+
+// DeleteAccount 注销账户
+func (h *Handler) DeleteAccount(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// 验证密码
+	var input struct {
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password is required"})
+		return
+	}
+
+	// 验证用户身份
+	u, err := h.userService.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	// 验证密码 - 通过尝试用旧密码更改来验证
+	err = h.userService.ChangePassword(c.Request.Context(), userID, input.Password, input.Password)
+	if err != nil && errors.Is(err, userService.ErrWrongPassword) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "password incorrect"})
+		return
+	}
+
+	// 执行软删除
+	if err := h.userService.AdminDelete(c.Request.Context(), u.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "account deleted successfully"})
 }
