@@ -175,11 +175,13 @@ func (s *Session) handleAudio(audioBase64 string) error {
 		return fmt.Errorf("decode audio: %w", err)
 	}
 
+	// 创建音频 channel
+	audioChan := make(chan []byte, 1)
+	audioChan <- audioData
+	close(audioChan)
+
 	// 发送到 ASR
-	resultChan, err := s.asrProvider.RecognizeStream(s.ctx, audioData, asr.RecognizeConfig{
-		SampleRate: 16000,
-		Format:     "pcm",
-	})
+	resultChan, err := s.asrProvider.TranscribeStream(s.ctx, audioChan, "pcm", 16000)
 	if err != nil {
 		return fmt.Errorf("ASR recognize: %w", err)
 	}
@@ -187,11 +189,6 @@ func (s *Session) handleAudio(audioBase64 string) error {
 	// 处理 ASR 结果
 	go func() {
 		for result := range resultChan {
-			if result.Error != nil {
-				log.Printf("[Session] ASR 错误: %v", result.Error)
-				continue
-			}
-
 			// 发送 ASR 结果
 			s.sendASR(result.Text, result.IsFinal)
 

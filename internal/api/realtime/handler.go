@@ -193,7 +193,7 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 
 	// 保存消息
 	for _, msg := range userMessages {
-		if err := h.convService.AddMessage(ctx, conv.ID, msg.Role, msg.Content); err != nil {
+		if _, err := h.convService.AddMessage(ctx, conv.ID, msg.Role, msg.Content); err != nil {
 			log.Printf("[Realtime] 保存消息失败: %v", err)
 		}
 	}
