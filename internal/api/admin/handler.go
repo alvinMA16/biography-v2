@@ -1,33 +1,51 @@
 package admin
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/peizhengma/biography-v2/internal/provider/llm"
 )
+
+// Handler Admin API 处理器
+type Handler struct {
+	llmManager *llm.Manager
+	// asrProvider asr.Provider
+	// ttsProvider tts.Provider
+	// db          *postgres.DB
+}
+
+// NewHandler 创建 Admin Handler
+func NewHandler(llmManager *llm.Manager) *Handler {
+	return &Handler{
+		llmManager: llmManager,
+	}
+}
 
 // --- 用户管理 ---
 
 // ListUsers 获取用户列表
-func ListUsers(c *gin.Context) {
+func (h *Handler) ListUsers(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // GetUser 获取用户详情
-func GetUser(c *gin.Context) {
+func (h *Handler) GetUser(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // UpdateUser 更新用户
-func UpdateUser(c *gin.Context) {
+func (h *Handler) UpdateUser(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // DeleteUser 删除用户（软删除）
-func DeleteUser(c *gin.Context) {
+func (h *Handler) DeleteUser(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
@@ -35,13 +53,13 @@ func DeleteUser(c *gin.Context) {
 // --- 对话管理 ---
 
 // ListConversations 获取对话列表
-func ListConversations(c *gin.Context) {
+func (h *Handler) ListConversations(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // GetConversation 获取对话详情
-func GetConversation(c *gin.Context) {
+func (h *Handler) GetConversation(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
@@ -49,25 +67,25 @@ func GetConversation(c *gin.Context) {
 // --- 回忆录管理 ---
 
 // ListMemoirs 获取回忆录列表
-func ListMemoirs(c *gin.Context) {
+func (h *Handler) ListMemoirs(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // UpdateMemoir 更新回忆录
-func UpdateMemoir(c *gin.Context) {
+func (h *Handler) UpdateMemoir(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // DeleteMemoir 删除回忆录
-func DeleteMemoir(c *gin.Context) {
+func (h *Handler) DeleteMemoir(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // RegenerateMemoir 重新生成回忆录
-func RegenerateMemoir(c *gin.Context) {
+func (h *Handler) RegenerateMemoir(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
@@ -75,25 +93,25 @@ func RegenerateMemoir(c *gin.Context) {
 // --- 话题管理 ---
 
 // ListTopics 获取话题列表
-func ListTopics(c *gin.Context) {
+func (h *Handler) ListTopics(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // CreateTopic 创建话题
-func CreateTopic(c *gin.Context) {
+func (h *Handler) CreateTopic(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // UpdateTopic 更新话题
-func UpdateTopic(c *gin.Context) {
+func (h *Handler) UpdateTopic(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // DeleteTopic 删除话题
-func DeleteTopic(c *gin.Context) {
+func (h *Handler) DeleteTopic(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
@@ -101,47 +119,214 @@ func DeleteTopic(c *gin.Context) {
 // --- 激励语管理 ---
 
 // ListQuotes 获取激励语列表
-func ListQuotes(c *gin.Context) {
+func (h *Handler) ListQuotes(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // CreateQuote 创建激励语
-func CreateQuote(c *gin.Context) {
+func (h *Handler) CreateQuote(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // UpdateQuote 更新激励语
-func UpdateQuote(c *gin.Context) {
+func (h *Handler) UpdateQuote(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // DeleteQuote 删除激励语
-func DeleteQuote(c *gin.Context) {
+func (h *Handler) DeleteQuote(c *gin.Context) {
 	// TODO: 实现
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // --- 系统监控 ---
 
+// ProviderStatus 单个 Provider 状态
+type ProviderStatus struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"` // ok, error, unavailable
+	Latency int64  `json:"latency_ms,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// HealthCheckResponse 健康检查响应
+type HealthCheckResponse struct {
+	Status    string                    `json:"status"` // healthy, degraded, unhealthy
+	Timestamp string                    `json:"timestamp"`
+	Providers map[string]ProviderStatus `json:"providers"`
+}
+
 // HealthCheck 健康检查
-func HealthCheck(c *gin.Context) {
-	// TODO: 检查各个 Provider 的健康状态
+func (h *Handler) HealthCheck(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	response := HealthCheckResponse{
+		Status:    "healthy",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Providers: make(map[string]ProviderStatus),
+	}
+
+	// 检查 LLM Providers
+	if h.llmManager != nil {
+		llmResults := h.llmManager.HealthCheck(ctx)
+		for name, err := range llmResults {
+			status := ProviderStatus{
+				Name:   name,
+				Status: "ok",
+			}
+			if err != nil {
+				status.Status = "error"
+				status.Error = err.Error()
+				response.Status = "degraded"
+			}
+			response.Providers["llm_"+name] = status
+		}
+	}
+
+	// TODO: 检查 ASR Provider
+	response.Providers["asr"] = ProviderStatus{
+		Name:   "aliyun",
+		Status: "unavailable",
+		Error:  "not configured",
+	}
+
+	// TODO: 检查 TTS Provider
+	response.Providers["tts"] = ProviderStatus{
+		Name:   "doubao",
+		Status: "unavailable",
+		Error:  "not configured",
+	}
+
+	// TODO: 检查数据库
+	response.Providers["database"] = ProviderStatus{
+		Name:   "postgres",
+		Status: "unavailable",
+		Error:  "not configured",
+	}
+
+	// 设置整体状态
+	healthyCount := 0
+	totalCount := 0
+	for _, status := range response.Providers {
+		totalCount++
+		if status.Status == "ok" {
+			healthyCount++
+		}
+	}
+
+	if healthyCount == 0 {
+		response.Status = "unhealthy"
+	} else if healthyCount < totalCount {
+		response.Status = "degraded"
+	}
+
+	statusCode := http.StatusOK
+	if response.Status == "unhealthy" {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	c.JSON(statusCode, response)
+}
+
+// GetLLMProviders 获取 LLM Provider 列表
+func (h *Handler) GetLLMProviders(c *gin.Context) {
+	if h.llmManager == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"providers": []string{},
+			"primary":   "",
+		})
+		return
+	}
+
+	primary, _ := h.llmManager.Primary()
+	primaryName := ""
+	if primary != nil {
+		primaryName = primary.Name()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"status": "healthy",
-		"providers": gin.H{
-			"llm": "ok",
-			"asr": "ok",
-			"tts": "ok",
-			"db":  "ok",
-		},
+		"providers": h.llmManager.Available(),
+		"primary":   primaryName,
+	})
+}
+
+// SetLLMProvider 设置主要 LLM Provider
+func (h *Handler) SetLLMProvider(c *gin.Context) {
+	var req struct {
+		Provider string `json:"provider" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if h.llmManager == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "LLM manager not initialized"})
+		return
+	}
+
+	if err := h.llmManager.SetPrimary(req.Provider); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "primary provider updated",
+		"provider": req.Provider,
+	})
+}
+
+// TestLLMProvider 测试 LLM Provider
+func (h *Handler) TestLLMProvider(c *gin.Context) {
+	providerName := c.Param("provider")
+
+	var req struct {
+		Prompt string `json:"prompt" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if h.llmManager == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "LLM manager not initialized"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	resp, err := h.llmManager.ChatWith(ctx, providerName, []llm.Message{
+		{Role: "user", Content: req.Prompt},
+	})
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      err.Error(),
+			"latency_ms": latency,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"provider":      providerName,
+		"response":      resp.Content,
+		"finish_reason": resp.FinishReason,
+		"tokens_used":   resp.TokensUsed,
+		"latency_ms":    latency,
 	})
 }
 
 // GetStats 获取统计数据
-func GetStats(c *gin.Context) {
+func (h *Handler) GetStats(c *gin.Context) {
 	// TODO: 实现统计数据
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }

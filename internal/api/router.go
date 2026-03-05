@@ -9,12 +9,20 @@ import (
 	"github.com/peizhengma/biography-v2/internal/api/realtime"
 	"github.com/peizhengma/biography-v2/internal/api/user"
 	"github.com/peizhengma/biography-v2/internal/config"
+	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
+// RouterDeps 路由依赖
+type RouterDeps struct {
+	Config     *config.Config
+	DB         *postgres.DB
+	LLMManager *llm.Manager
+}
+
 // NewRouter 创建路由
-func NewRouter(cfg *config.Config, db *postgres.DB) http.Handler {
-	if cfg.Env == "production" {
+func NewRouter(deps *RouterDeps) http.Handler {
+	if deps.Config.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -42,7 +50,7 @@ func NewRouter(cfg *config.Config, db *postgres.DB) http.Handler {
 
 	// 用户端路由（需要 JWT 认证）
 	userRoutes := api.Group("")
-	userRoutes.Use(middleware.JWTAuth(cfg.JWTSecret))
+	userRoutes.Use(middleware.JWTAuth(deps.Config.JWTSecret))
 	{
 		// 用户信息
 		userRoutes.GET("/user/profile", user.GetProfile)
@@ -66,41 +74,49 @@ func NewRouter(cfg *config.Config, db *postgres.DB) http.Handler {
 	// WebSocket 实时对话（需要 JWT 认证，通过 query param）
 	api.GET("/realtime/dialog", realtime.HandleDialog)
 
+	// 创建 Admin Handler
+	adminHandler := admin.NewHandler(deps.LLMManager)
+
 	// 管理端路由（需要 Admin API Key）
 	adminRoutes := api.Group("/admin")
-	adminRoutes.Use(middleware.AdminAuth(cfg.AdminAPIKey))
+	adminRoutes.Use(middleware.AdminAuth(deps.Config.AdminAPIKey))
 	{
 		// 用户管理
-		adminRoutes.GET("/users", admin.ListUsers)
-		adminRoutes.GET("/users/:id", admin.GetUser)
-		adminRoutes.PUT("/users/:id", admin.UpdateUser)
-		adminRoutes.DELETE("/users/:id", admin.DeleteUser)
+		adminRoutes.GET("/users", adminHandler.ListUsers)
+		adminRoutes.GET("/users/:id", adminHandler.GetUser)
+		adminRoutes.PUT("/users/:id", adminHandler.UpdateUser)
+		adminRoutes.DELETE("/users/:id", adminHandler.DeleteUser)
 
 		// 对话管理
-		adminRoutes.GET("/conversations", admin.ListConversations)
-		adminRoutes.GET("/conversations/:id", admin.GetConversation)
+		adminRoutes.GET("/conversations", adminHandler.ListConversations)
+		adminRoutes.GET("/conversations/:id", adminHandler.GetConversation)
 
 		// 回忆录管理
-		adminRoutes.GET("/memoirs", admin.ListMemoirs)
-		adminRoutes.PUT("/memoirs/:id", admin.UpdateMemoir)
-		adminRoutes.DELETE("/memoirs/:id", admin.DeleteMemoir)
-		adminRoutes.POST("/memoirs/:id/regenerate", admin.RegenerateMemoir)
+		adminRoutes.GET("/memoirs", adminHandler.ListMemoirs)
+		adminRoutes.PUT("/memoirs/:id", adminHandler.UpdateMemoir)
+		adminRoutes.DELETE("/memoirs/:id", adminHandler.DeleteMemoir)
+		adminRoutes.POST("/memoirs/:id/regenerate", adminHandler.RegenerateMemoir)
 
 		// 话题管理
-		adminRoutes.GET("/topics", admin.ListTopics)
-		adminRoutes.POST("/topics", admin.CreateTopic)
-		adminRoutes.PUT("/topics/:id", admin.UpdateTopic)
-		adminRoutes.DELETE("/topics/:id", admin.DeleteTopic)
+		adminRoutes.GET("/topics", adminHandler.ListTopics)
+		adminRoutes.POST("/topics", adminHandler.CreateTopic)
+		adminRoutes.PUT("/topics/:id", adminHandler.UpdateTopic)
+		adminRoutes.DELETE("/topics/:id", adminHandler.DeleteTopic)
 
 		// 激励语管理
-		adminRoutes.GET("/quotes", admin.ListQuotes)
-		adminRoutes.POST("/quotes", admin.CreateQuote)
-		adminRoutes.PUT("/quotes/:id", admin.UpdateQuote)
-		adminRoutes.DELETE("/quotes/:id", admin.DeleteQuote)
+		adminRoutes.GET("/quotes", adminHandler.ListQuotes)
+		adminRoutes.POST("/quotes", adminHandler.CreateQuote)
+		adminRoutes.PUT("/quotes/:id", adminHandler.UpdateQuote)
+		adminRoutes.DELETE("/quotes/:id", adminHandler.DeleteQuote)
+
+		// LLM Provider 管理
+		adminRoutes.GET("/llm/providers", adminHandler.GetLLMProviders)
+		adminRoutes.PUT("/llm/providers/primary", adminHandler.SetLLMProvider)
+		adminRoutes.POST("/llm/providers/:provider/test", adminHandler.TestLLMProvider)
 
 		// 系统监控
-		adminRoutes.GET("/monitor/health", admin.HealthCheck)
-		adminRoutes.GET("/monitor/stats", admin.GetStats)
+		adminRoutes.GET("/monitor/health", adminHandler.HealthCheck)
+		adminRoutes.GET("/monitor/stats", adminHandler.GetStats)
 	}
 
 	return r

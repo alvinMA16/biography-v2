@@ -11,6 +11,9 @@ import (
 
 	"github.com/peizhengma/biography-v2/internal/api"
 	"github.com/peizhengma/biography-v2/internal/config"
+	"github.com/peizhengma/biography-v2/internal/provider/llm"
+	"github.com/peizhengma/biography-v2/internal/provider/llm/dashscope"
+	"github.com/peizhengma/biography-v2/internal/provider/llm/gemini"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
 )
 
@@ -28,8 +31,15 @@ func main() {
 	}
 	defer db.Close()
 
+	// 初始化 LLM Manager
+	llmManager := initLLMProviders(cfg)
+
 	// 初始化路由
-	router := api.NewRouter(cfg, db)
+	router := api.NewRouter(&api.RouterDeps{
+		Config:     cfg,
+		DB:         db,
+		LLMManager: llmManager,
+	})
 
 	// 创建 HTTP 服务器
 	srv := &http.Server{
@@ -43,6 +53,7 @@ func main() {
 	// 启动服务器（非阻塞）
 	go func() {
 		log.Printf("Server starting on port %s", cfg.Port)
+		log.Printf("LLM providers: %v (primary: %s)", llmManager.Available(), cfg.LLMProviderDefault)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
@@ -62,4 +73,50 @@ func main() {
 	}
 
 	log.Println("Server exited")
+}
+
+// initLLMProviders 初始化 LLM 提供者
+func initLLMProviders(cfg *config.Config) *llm.Manager {
+	manager := llm.NewManager(cfg.LLMProviderDefault)
+
+	// 初始化 Gemini
+	if cfg.GeminiAPIKey != "" {
+		geminiProvider, err := gemini.New(llm.ProviderConfig{
+			APIKey:    cfg.GeminiAPIKey,
+			Model:     cfg.GeminiModel,
+			ModelFast: cfg.GeminiModelFast,
+			Proxy:     cfg.GeminiProxy,
+			Timeout:   60,
+		})
+		if err != nil {
+			log.Printf("Warning: Failed to initialize Gemini provider: %v", err)
+		} else {
+			manager.Register(geminiProvider)
+			log.Printf("Gemini provider initialized (model: %s)", cfg.GeminiModel)
+		}
+	}
+
+	// 初始化 DashScope
+	if cfg.DashScopeAPIKey != "" {
+		dashscopeProvider, err := dashscope.New(llm.ProviderConfig{
+			APIKey:    cfg.DashScopeAPIKey,
+			BaseURL:   cfg.DashScopeBaseURL,
+			Model:     cfg.DashScopeModel,
+			ModelFast: cfg.DashScopeModelFast,
+			Timeout:   60,
+		})
+		if err != nil {
+			log.Printf("Warning: Failed to initialize DashScope provider: %v", err)
+		} else {
+			manager.Register(dashscopeProvider)
+			log.Printf("DashScope provider initialized (model: %s)", cfg.DashScopeModel)
+		}
+	}
+
+	// 检查是否有可用的 Provider
+	if len(manager.Available()) == 0 {
+		log.Println("Warning: No LLM providers configured")
+	}
+
+	return manager
 }
