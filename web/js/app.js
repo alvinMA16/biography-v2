@@ -427,7 +427,6 @@ function updateRecorderSelection(gender) {
 }
 
 // 选择记录师
-let previewWs = null;
 let previewAudioContext = null;
 let previewAudioQueue = [];
 let previewNextPlayTime = 0;
@@ -479,8 +478,7 @@ async function playRecorderGreeting(gender) {
     stopPreviewAudio();
 
     const recorder = RECORDERS[gender];
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${wsProtocol}://${window.location.host}/api/realtime/preview?speaker=${encodeURIComponent(recorder.speaker)}&text=${encodeURIComponent(recorder.greeting)}`;
+    const url = `/api/realtime/preview?speaker=${encodeURIComponent(recorder.speaker)}&text=${encodeURIComponent(recorder.greeting)}`;
 
     try {
         previewAudioContext = new AudioContext({ sampleRate: 24000 });
@@ -489,21 +487,14 @@ async function playRecorderGreeting(gender) {
             await previewAudioContext.resume();
         }
 
-        previewWs = new WebSocket(wsUrl);
-
-        previewWs.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            if (message.type === 'audio') {
-                const audioData = base64ToArrayBuffer(message.data);
-                playPreviewAudio(audioData);
-            } else if (message.type === 'done') {
-                // 播放完成
-            }
-        };
-
-        previewWs.onerror = (error) => {
-            console.error('预览音频失败:', error);
-        };
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            console.error('预览音频失败:', resp.status);
+            return;
+        }
+        const data = await resp.json();
+        const audioData = base64ToArrayBuffer(data.audio);
+        playPreviewAudio(audioData);
 
     } catch (error) {
         console.error('播放开场白失败:', error);
@@ -553,10 +544,6 @@ function base64ToArrayBuffer(base64) {
 }
 
 function stopPreviewAudio() {
-    if (previewWs) {
-        previewWs.close();
-        previewWs = null;
-    }
     if (previewAudioContext) {
         previewAudioContext.close();
         previewAudioContext = null;

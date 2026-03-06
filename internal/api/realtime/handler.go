@@ -188,32 +188,19 @@ func (h *Handler) HandlePreview(c *gin.Context) {
 	}
 	speaker := strings.TrimSpace(c.Query("speaker"))
 
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Printf("[Realtime] preview websocket upgrade failed: %v", err)
-		return
-	}
-	defer conn.Close()
-
 	audio, err := h.ttsProvider.Synthesize(c.Request.Context(), text, tts.SynthesisConfig{
 		Voice:      speaker,
 		SampleRate: 24000,
 		Format:     "pcm",
 	})
 	if err != nil {
-		_ = conn.WriteJSON(gin.H{
-			"type":    "error",
-			"message": err.Error(),
-		})
+		log.Printf("[Realtime] preview TTS failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	_ = conn.WriteJSON(gin.H{
-		"type": "audio",
-		"data": base64.StdEncoding.EncodeToString(audio),
-	})
-	_ = conn.WriteJSON(gin.H{
-		"type": "done",
+	c.JSON(http.StatusOK, gin.H{
+		"audio": base64.StdEncoding.EncodeToString(audio),
 	})
 }
 
