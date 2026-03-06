@@ -245,7 +245,7 @@ async function selectTopic(topicId, topic, greeting, context, ageStart, ageEnd) 
             conversationInput.context = context || '';
         }
         const result = await api.conversation.start(conversationInput);
-        storage.set('currentConversationId', result.conversation_id);
+        storage.set('currentConversationId', result.id);
 
         // 存储选择的话题信息
         storage.set('selectedTopic', topic);
@@ -391,12 +391,12 @@ async function submitChangePassword() {
 const RECORDERS = {
     female: {
         name: '忆安',
-        speaker: 'zh_female_vv_jupiter_bigtts',
+        speaker: 'zh_female_mizaitongxue_v2_saturn_bigtts',
         greeting: '您好，我是小安。很高兴能成为您的人生记录师，期待听您讲述那些珍贵的回忆。'
     },
     male: {
         name: '言川',
-        speaker: 'zh_male_xiaotian_jupiter_bigtts',
+        speaker: 'zh_male_dayixiansheng_v2_saturn_bigtts',
         greeting: '您好，我是小川。能够记录您的人生故事，是我的荣幸。请慢慢讲，我都在听。'
     }
 };
@@ -465,7 +465,7 @@ async function startProfileCollection() {
     try {
         // 创建新对话
         const result = await api.conversation.start();
-        storage.set('currentConversationId', result.conversation_id);
+        storage.set('currentConversationId', result.id);
         // 跳转到对话页面（会自动检测到未完成信息收集）
         window.location.href = 'chat.html';
     } catch (error) {
