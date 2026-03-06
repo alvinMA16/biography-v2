@@ -1097,8 +1097,228 @@ func (h *Handler) TestLLMProvider(c *gin.Context) {
 
 // GetStats 获取统计数据
 func (h *Handler) GetStats(c *gin.Context) {
-	// TODO: 实现统计数据
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	ctx := c.Request.Context()
+
+	// 获取用户统计
+	users, totalUsers, _ := h.userService.AdminList(ctx, 10000, 0)
+
+	// 计算资料完成率
+	profileCompleted := 0
+	birthDecadeMap := make(map[string]int)
+	hometownMap := make(map[string]int)
+
+	for _, u := range users {
+		if u.ProfileCompleted {
+			profileCompleted++
+		}
+		// 出生年代分布
+		if u.BirthYear != nil && *u.BirthYear > 0 {
+			decade := (*u.BirthYear / 10) * 10
+			label := fmt.Sprintf("%d年代", decade)
+			birthDecadeMap[label]++
+		}
+		// 家乡分布（简化处理，取省份）
+		if u.Hometown != nil && *u.Hometown != "" {
+			province := extractProvince(*u.Hometown)
+			if province != "" {
+				hometownMap[province]++
+			}
+		}
+	}
+
+	profileRate := 0.0
+	if totalUsers > 0 {
+		profileRate = float64(profileCompleted) / float64(totalUsers)
+	}
+
+	// 获取对话统计
+	conversations, totalConversations, _ := h.convService.AdminList(ctx, nil, nil, 10000, 0)
+
+	// 获取回忆录统计
+	memoirs, totalMemoirs, _ := h.memoirService.AdminList(ctx, 10000, 0, false)
+
+	// 计算今日和本周活跃
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	weekStart := todayStart.AddDate(0, 0, -7)
+
+	todayActiveUsers := make(map[uuid.UUID]bool)
+	weekActiveUsers := make(map[uuid.UUID]bool)
+	todayNewConversations := 0
+	todayNewMemoirs := 0
+
+	// 用户对话次数分布
+	userConvCount := make(map[uuid.UUID]int)
+	// 对话消息数分布
+	msgCountBuckets := map[string]int{
+		"0-5轮":   0,
+		"6-10轮":  0,
+		"11-20轮": 0,
+		"21-50轮": 0,
+		"50轮以上": 0,
+	}
+
+	for _, conv := range conversations {
+		userConvCount[conv.UserID]++
+
+		if conv.CreatedAt.After(todayStart) {
+			todayActiveUsers[conv.UserID] = true
+			todayNewConversations++
+		}
+		if conv.CreatedAt.After(weekStart) {
+			weekActiveUsers[conv.UserID] = true
+		}
+
+		// 消息数分布
+		msgCount := conv.MessageCount
+		switch {
+		case msgCount <= 5:
+			msgCountBuckets["0-5轮"]++
+		case msgCount <= 10:
+			msgCountBuckets["6-10轮"]++
+		case msgCount <= 20:
+			msgCountBuckets["11-20轮"]++
+		case msgCount <= 50:
+			msgCountBuckets["21-50轮"]++
+		default:
+			msgCountBuckets["50轮以上"]++
+		}
+	}
+
+	// 用户回忆录数分布
+	userMemoirCount := make(map[uuid.UUID]int)
+	for _, m := range memoirs {
+		userMemoirCount[m.UserID]++
+		if m.CreatedAt.After(todayStart) {
+			todayNewMemoirs++
+		}
+	}
+
+	// 构建分布数据
+	convPerUserBuckets := map[string]int{
+		"0次":    0,
+		"1-2次":  0,
+		"3-5次":  0,
+		"6-10次": 0,
+		"10次以上": 0,
+	}
+	memoirPerUserBuckets := map[string]int{
+		"0篇":   0,
+		"1-2篇": 0,
+		"3-5篇": 0,
+		"6篇以上": 0,
+	}
+
+	for _, u := range users {
+		convCount := userConvCount[u.ID]
+		switch {
+		case convCount == 0:
+			convPerUserBuckets["0次"]++
+		case convCount <= 2:
+			convPerUserBuckets["1-2次"]++
+		case convCount <= 5:
+			convPerUserBuckets["3-5次"]++
+		case convCount <= 10:
+			convPerUserBuckets["6-10次"]++
+		default:
+			convPerUserBuckets["10次以上"]++
+		}
+
+		memoirCount := userMemoirCount[u.ID]
+		switch {
+		case memoirCount == 0:
+			memoirPerUserBuckets["0篇"]++
+		case memoirCount <= 2:
+			memoirPerUserBuckets["1-2篇"]++
+		case memoirCount <= 5:
+			memoirPerUserBuckets["3-5篇"]++
+		default:
+			memoirPerUserBuckets["6篇以上"]++
+		}
+	}
+
+	// 简单的留存率计算（基于有多次对话的用户比例）
+	retention1 := 0.0
+	retention7 := 0.0
+	retention30 := 0.0
+	if totalUsers > 0 {
+		usersWithMultipleConv := 0
+		for _, count := range userConvCount {
+			if count > 1 {
+				usersWithMultipleConv++
+			}
+		}
+		retention1 = float64(len(todayActiveUsers)) / float64(totalUsers)
+		retention7 = float64(len(weekActiveUsers)) / float64(totalUsers)
+		retention30 = float64(usersWithMultipleConv) / float64(totalUsers)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"overview": gin.H{
+			"total_users":             totalUsers,
+			"profile_completion_rate": profileRate,
+			"total_conversations":     totalConversations,
+			"total_memoirs":           totalMemoirs,
+		},
+		"activity": gin.H{
+			"today_active_users":       len(todayActiveUsers),
+			"week_active_users":        len(weekActiveUsers),
+			"today_new_conversations":  todayNewConversations,
+			"today_new_memoirs":        todayNewMemoirs,
+		},
+		"retention": gin.H{
+			"day1":  retention1,
+			"day7":  retention7,
+			"day30": retention30,
+		},
+		"distributions": gin.H{
+			"birth_decade":             mapToDistribution(birthDecadeMap),
+			"hometown_province":        mapToDistribution(hometownMap),
+			"conversations_per_user":   bucketToDistribution(convPerUserBuckets, []string{"0次", "1-2次", "3-5次", "6-10次", "10次以上"}),
+			"memoirs_per_user":         bucketToDistribution(memoirPerUserBuckets, []string{"0篇", "1-2篇", "3-5篇", "6篇以上"}),
+			"messages_per_conversation": bucketToDistribution(msgCountBuckets, []string{"0-5轮", "6-10轮", "11-20轮", "21-50轮", "50轮以上"}),
+		},
+	})
+}
+
+// extractProvince 从地址中提取省份
+func extractProvince(address string) string {
+	provinces := []string{"北京", "上海", "天津", "重庆", "河北", "山西", "辽宁", "吉林", "黑龙江",
+		"江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东",
+		"海南", "四川", "贵州", "云南", "陕西", "甘肃", "青海", "台湾", "内蒙古", "广西",
+		"西藏", "宁夏", "新疆", "香港", "澳门"}
+	for _, p := range provinces {
+		if strings.Contains(address, p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// mapToDistribution 将 map 转换为分布数组
+func mapToDistribution(m map[string]int) []gin.H {
+	var result []gin.H
+	for label, count := range m {
+		result = append(result, gin.H{"label": label, "count": count})
+	}
+	// 按 count 降序排序
+	for i := 0; i < len(result); i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i]["count"].(int) < result[j]["count"].(int) {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	return result
+}
+
+// bucketToDistribution 将桶转换为有序分布数组
+func bucketToDistribution(buckets map[string]int, order []string) []gin.H {
+	var result []gin.H
+	for _, label := range order {
+		result = append(result, gin.H{"label": label, "count": buckets[label]})
+	}
+	return result
 }
 
 // GetTTSVoices 获取 TTS 音色列表
