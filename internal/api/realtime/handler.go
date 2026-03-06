@@ -2,8 +2,10 @@ package realtime
 
 import (
 	"context"
+	"encoding/base64"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/peizhengma/biography-v2/internal/domain/conversation"
-	"github.com/peizhengma/biography-v2/internal/domain/memoir"
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
@@ -86,7 +87,7 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 	}
 
 	// 获取对话模式
-	mode := Mode(c.DefaultQuery("mode", string(ModeNormal)))
+	mode := Mode(c.Query("mode"))
 	topicID := c.Query("topic_id")
 
 	// 加载用户信息
@@ -95,17 +96,38 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取用户信息失败"})
 		return
 	}
+	if mode == "" {
+		if user.ProfileCompleted {
+			mode = ModeNormal
+		} else {
+			mode = ModeProfileCollection
+		}
+	}
 
 	// 构建会话配置
 	config := &SessionConfig{
-		Mode:        mode,
-		TopicID:     topicID,
-		UserID:      userID.String(),
-		UserName:    getUserDisplayName(user),
-		BirthYear:   user.BirthYear,
-		Hometown:    deref(user.Hometown),
-		MainCity:    deref(user.MainCity),
-		EraMemories: deref(user.EraMemories),
+		Mode:           mode,
+		TopicID:        topicID,
+		ConversationID: c.Query("conversation_id"),
+		UserID:         userID.String(),
+		UserName:       getUserDisplayName(user),
+		BirthYear:      user.BirthYear,
+		Hometown:       deref(user.Hometown),
+		MainCity:       deref(user.MainCity),
+		EraMemories:    deref(user.EraMemories),
+	}
+
+	// 支持前端直接传 topic/greeting/context（兼容当前 web 端）
+	if config.Mode == ModeNormal {
+		if t := c.Query("topic"); t != "" {
+			config.TopicTitle = t
+		}
+		if g := c.Query("greeting"); g != "" {
+			config.TopicGreeting = g
+		}
+		if ctx := c.Query("context"); ctx != "" {
+			config.TopicContext = ctx
+		}
 	}
 
 	// 如果是 normal 模式，加载话题信息
@@ -152,6 +174,49 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 	go h.saveConversation(userID, config, session)
 }
 
+// HandlePreview 处理记录师音色预览
+func (h *Handler) HandlePreview(c *gin.Context) {
+	if h.ttsProvider == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "TTS provider not available"})
+		return
+	}
+
+	text := strings.TrimSpace(c.Query("text"))
+	if text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "text is required"})
+		return
+	}
+	speaker := strings.TrimSpace(c.Query("speaker"))
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Printf("[Realtime] preview websocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	audio, err := h.ttsProvider.Synthesize(c.Request.Context(), text, tts.SynthesisConfig{
+		Voice:      speaker,
+		SampleRate: 24000,
+		Format:     "pcm",
+	})
+	if err != nil {
+		_ = conn.WriteJSON(gin.H{
+			"type":    "error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	_ = conn.WriteJSON(gin.H{
+		"type": "audio",
+		"data": base64.StdEncoding.EncodeToString(audio),
+	})
+	_ = conn.WriteJSON(gin.H{
+		"type": "done",
+	})
+}
+
 // saveConversation 保存对话历史并生成回忆录
 func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, session *Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -180,70 +245,39 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 		return
 	}
 
-	// 创建对话记录
-	conv, err := h.convService.Create(ctx, userID, &conversation.CreateConversationInput{
-		Topic:    config.TopicTitle,
-		Greeting: config.TopicGreeting,
-		Context:  config.TopicContext,
-	})
-	if err != nil {
-		log.Printf("[Realtime] 创建对话失败: %v", err)
-		return
+	// 优先写入前端传入的 conversation_id，避免实时会话与 REST 流程断链
+	var convID uuid.UUID
+	if config.ConversationID != "" {
+		if parsed, err := uuid.Parse(config.ConversationID); err == nil {
+			if _, err := h.convService.GetByIDForUser(ctx, parsed, userID); err == nil {
+				convID = parsed
+			} else {
+				log.Printf("[Realtime] 指定对话不可用，回退自动创建: conv=%s err=%v", parsed, err)
+			}
+		}
 	}
 
-	// 保存消息
+	if convID == uuid.Nil {
+		conv, err := h.convService.Create(ctx, userID, &conversation.CreateConversationInput{
+			Topic:    config.TopicTitle,
+			Greeting: config.TopicGreeting,
+			Context:  config.TopicContext,
+		})
+		if err != nil {
+			log.Printf("[Realtime] 创建对话失败: %v", err)
+			return
+		}
+		convID = conv.ID
+	}
+
+	// 仅保存消息；对话结束、摘要、回忆录由 /conversations/:id/end-quick 流程处理
 	for _, msg := range userMessages {
-		if _, err := h.convService.AddMessage(ctx, conv.ID, msg.Role, msg.Content); err != nil {
+		if _, err := h.convService.AddMessage(ctx, convID, msg.Role, msg.Content); err != nil {
 			log.Printf("[Realtime] 保存消息失败: %v", err)
 		}
 	}
 
-	log.Printf("[Realtime] 对话保存成功: conversation_id=%s, messages=%d", conv.ID, len(userMessages))
-
-	// 生成摘要
-	conversationText := session.GetConversationText()
-	summary, err := h.llmService.GenerateSummary(ctx, config.TopicTitle, conversationText)
-	if err != nil {
-		log.Printf("[Realtime] 生成摘要失败: %v", err)
-	} else {
-		if err := h.convService.UpdateSummary(ctx, conv.ID, summary); err != nil {
-			log.Printf("[Realtime] 更新摘要失败: %v", err)
-		}
-	}
-
-	// 完成对话状态
-	if err := h.convService.Complete(ctx, conv.ID, userID); err != nil {
-		log.Printf("[Realtime] 完成对话失败: %v", err)
-	}
-
-	// 生成回忆录
-	memoirResult, err := h.llmService.GenerateMemoir(ctx, &llmService.GenerateMemoirInput{
-		UserName:     config.UserName,
-		BirthYear:    config.BirthYear,
-		Hometown:     config.Hometown,
-		Topic:        config.TopicTitle,
-		Conversation: conversationText,
-	})
-	if err != nil {
-		log.Printf("[Realtime] 生成回忆录失败: %v", err)
-		return
-	}
-
-	// 保存回忆录
-	_, err = h.memoirService.Create(ctx, userID, &memoir.CreateMemoirInput{
-		ConversationID: &conv.ID,
-		Title:          memoirResult.Title,
-		Content:        memoirResult.Content,
-		TimePeriod:     memoirResult.TimePeriod,
-		StartYear:      memoirResult.StartYear,
-		EndYear:        memoirResult.EndYear,
-	})
-	if err != nil {
-		log.Printf("[Realtime] 保存回忆录失败: %v", err)
-		return
-	}
-
-	log.Printf("[Realtime] 回忆录生成成功: conversation_id=%s, title=%s", conv.ID, memoirResult.Title)
+	log.Printf("[Realtime] 对话消息保存成功: conversation_id=%s, messages=%d", convID, len(userMessages))
 }
 
 // validateToken 验证 JWT token

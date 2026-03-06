@@ -44,19 +44,20 @@ type ServerMessage struct {
 
 // SessionConfig 会话配置
 type SessionConfig struct {
-	Mode    Mode
-	TopicID string
+	Mode           Mode
+	TopicID        string
+	ConversationID string
 
 	// 用户信息（从数据库加载）
-	UserID        string
-	UserName      string
-	BirthYear     *int
-	Hometown      string
-	MainCity      string
-	EraMemories   string
+	UserID      string
+	UserName    string
+	BirthYear   *int
+	Hometown    string
+	MainCity    string
+	EraMemories string
 
 	// 话题信息（normal 模式）
-	TopicTitle   string
+	TopicTitle    string
 	TopicGreeting string
-	TopicContext string
+	TopicContext  string
 }

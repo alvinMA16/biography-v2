@@ -32,6 +32,9 @@ let currentAIResponse = '';  // 累积AI回复文本
 let isAISpeaking = false;    // AI是否正在说话
 let isFirstTTS = true;       // 是否是第一次 TTS（开场白）
 let pendingGreeting = null;  // 后端发来的开场白文本，等 TTS 开始时显示
+let lastVoiceDetectedAt = 0; // 最近一次检测到人声时间戳
+let sentVoiceSinceLastStop = false;
+let vadTimer = null;
 
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
@@ -139,6 +142,9 @@ async function connectWebSocket() {
         conversation_id: conversationId,
         token: token,
     });
+    if (isProfileCollectionMode) {
+        params.set('mode', 'profile_collection');
+    }
 
     // 如果有选择的话题，添加到参数中
     if (selectedTopic) {
@@ -164,6 +170,10 @@ async function connectWebSocket() {
 
         ws.onopen = () => {
             DEBUG_MODE && console.log('WebSocket 已连接');
+            isConnected = true;
+            updateAIText('连接成功，请先听记录师开场');
+            updateVoiceStatus('请稍候');
+            requestMicrophoneEarly();
         };
 
         ws.onmessage = (event) => {
@@ -190,27 +200,24 @@ async function connectWebSocket() {
 
 function handleServerMessage(message) {
     // 音频消息量太大，debug 模式也不打印
-    if (DEBUG_MODE && message.type !== 'audio') {
+    if (DEBUG_MODE && message.type !== 'audio' && message.type !== 'tts') {
         console.log('收到消息:', message.type, message);
     }
 
     switch (message.type) {
-        case 'status':
-            if (message.status === 'connected') {
-                isConnected = true;
-                updateAIText('');  // 清空，等待 AI 开始说话后再显示
-                updateVoiceStatus('请稍候');
-                // 提前请求麦克风权限，用户点击"允许"后 AudioContext 就能正常播放
-                requestMicrophoneEarly();
-            } else if (message.status === 'error') {
-                showError(message.message);
-            }
-            break;
-
+        // 兼容旧协议：audio/text/event/status
         case 'audio':
             // 收到音频数据，加入播放队列
             const audioData = base64ToArrayBuffer(message.data);
             queueAudio(audioData);
+            break;
+
+        // 新协议：tts
+        case 'tts':
+            isAISpeaking = true;
+            setVoiceActive(false);
+            updateVoiceStatus('记录师正在说话');
+            queueAudio(base64ToArrayBuffer(message.data));
             break;
 
         case 'text':
@@ -229,8 +236,37 @@ function handleServerMessage(message) {
             }
             break;
 
+        // 新协议：asr/response/done/error
+        case 'asr':
+            DEBUG_MODE && console.log('用户说:', message.text);
+            break;
+
+        case 'response':
+            currentAIResponse = message.text || '';
+            updateAIText(currentAIResponse);
+            break;
+
+        case 'done':
+            isAISpeaking = false;
+            setVoiceActive(false);
+            updateVoiceStatus('请开始说话');
+            if (!isRecording) {
+                setTimeout(() => startRecording(), 200);
+            }
+            break;
+
+        case 'error':
+            showError(message.error || '对话异常');
+            break;
+
         case 'event':
             handleEvent(message.event, message.payload);
+            break;
+
+        case 'status':
+            if (message.status === 'error') {
+                showError(message.message);
+            }
             break;
 
         case 'debug':
@@ -344,6 +380,16 @@ async function startRecording() {
             if (!isRecording || !isConnected) return;
 
             const inputData = e.inputBuffer.getChannelData(0);
+            let energy = 0;
+            for (let i = 0; i < inputData.length; i++) {
+                energy += inputData[i] * inputData[i];
+            }
+            const rms = Math.sqrt(energy / inputData.length);
+            if (rms > 0.015) {
+                lastVoiceDetectedAt = Date.now();
+                sentVoiceSinceLastStop = true;
+            }
+
             // 转换为 16bit PCM
             const pcmData = float32ToPCM16(inputData);
             // 发送到服务器
@@ -355,6 +401,25 @@ async function startRecording() {
 
         isRecording = true;
         updateVoiceStatus('请开始说话');
+        setVoiceActive(true);
+        lastVoiceDetectedAt = Date.now();
+        sentVoiceSinceLastStop = false;
+
+        if (!vadTimer) {
+            vadTimer = setInterval(() => {
+                if (!isRecording || !isConnected || isAISpeaking) return;
+                if (!sentVoiceSinceLastStop) return;
+                if (Date.now() - lastVoiceDetectedAt < 1200) return;
+
+                // 一次发言结束，通知服务端开始生成回复
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'stop' }));
+                    updateVoiceStatus('正在思考...');
+                }
+                sentVoiceSinceLastStop = false;
+                setVoiceActive(false);
+            }, 300);
+        }
 
     } catch (error) {
         console.error('无法访问麦克风:', error);
@@ -379,6 +444,11 @@ function stopRecording() {
     if (mediaStream) {
         mediaStream.getTracks().forEach(track => track.stop());
         mediaStream = null;
+    }
+
+    if (vadTimer) {
+        clearInterval(vadTimer);
+        vadTimer = null;
     }
 }
 
@@ -698,9 +768,7 @@ async function endChat() {
             // 信息收集模式：显示欢迎弹窗
             await showWelcomeModal();
         } else {
-            // 正常对话模式：后台生成回忆录，直接跳转
-            api.memoir.generateAsync(conversationId);
-            // 显示简短提示后跳转
+            // 正常对话模式：后台异步处理摘要和回忆录
             showToast('对话已保存，可在「我的回忆」中查看');
             setTimeout(() => {
                 navigateHome();
@@ -715,16 +783,8 @@ async function endChat() {
 
 // 显示欢迎弹窗（信息收集完成后）
 async function showWelcomeModal() {
-    // 直接调用后端标记 profile 完成，不依赖后台异步任务
-    try {
-        await api.user.completeProfile();
-        DEBUG_MODE && console.log('已标记 profile 完成');
-    } catch (error) {
-        console.error('标记 profile 完成失败:', error);
-    }
-
-    // 清除临时标记（因为后端已经同步更新了）
-    storage.remove('profileJustCompleted');
+    // 标记“刚完成信息收集”，避免后台提取资料有延迟时反复进入引导
+    storage.set('profileJustCompleted', true);
 
     const modal = document.getElementById('welcomeModal');
     if (modal) {
@@ -758,7 +818,7 @@ window.onbeforeunload = function() {
     // 用户直接关闭/刷新页面时，兜底结束对话（keepalive 允许页面关闭后请求继续）
     if (conversationId && !conversationEnded) {
         const token = storage.get('token');
-        const url = `${API_BASE_URL}/conversation/${conversationId}/end-quick`;
+        const url = `${API_BASE_URL}/conversations/${conversationId}/end-quick`;
         try {
             fetch(url, {
                 method: 'POST',

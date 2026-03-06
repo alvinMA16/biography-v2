@@ -3,9 +3,11 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -447,6 +449,100 @@ func (h *Handler) UpdateMemoir(c *gin.Context) {
 	c.JSON(http.StatusOK, m)
 }
 
+// RegenerateMemoir 重新生成回忆录内容
+func (h *Handler) RegenerateMemoir(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	memoirID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memoir id"})
+		return
+	}
+
+	var input struct {
+		Perspective string `json:"perspective"`
+	}
+	_ = c.ShouldBindJSON(&input) // 目前仅兼容接收参数，暂未区分人称 prompt
+
+	// 获取回忆录与归属校验
+	m, err := h.memoirService.GetByIDForUser(c.Request.Context(), memoirID, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, memoirService.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, memoirService.ErrNotOwner) {
+			status = http.StatusForbidden
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	if m.ConversationID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "memoir has no source conversation"})
+		return
+	}
+
+	// 获取对话和消息
+	conv, err := h.convService.GetWithMessages(c.Request.Context(), *m.ConversationID, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, convService.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, convService.ErrNotOwner) {
+			status = http.StatusForbidden
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	conversationText := buildConversationText(conv.Messages)
+	if strings.TrimSpace(conversationText) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "conversation is empty"})
+		return
+	}
+
+	u, err := h.userService.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load user profile"})
+		return
+	}
+
+	topicTitle := ""
+	if conv.Topic != nil {
+		topicTitle = *conv.Topic
+	}
+
+	generated, err := h.llmService.GenerateMemoir(c.Request.Context(), &llmService.GenerateMemoirInput{
+		UserName:     u.DisplayName(),
+		BirthYear:    u.BirthYear,
+		Hometown:     stringValue(u.Hometown),
+		Topic:        topicTitle,
+		Conversation: conversationText,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	updated, err := h.memoirService.Update(c.Request.Context(), memoirID, userID, &memoir.UpdateMemoirInput{
+		Title:      &generated.Title,
+		Content:    &generated.Content,
+		TimePeriod: &generated.TimePeriod,
+		StartYear:  generated.StartYear,
+		EndYear:    generated.EndYear,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, updated)
+}
+
 // DeleteMemoir 删除回忆录
 func (h *Handler) DeleteMemoir(c *gin.Context) {
 	userID := getUserID(c)
@@ -767,4 +863,23 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "account deleted successfully"})
+}
+
+func buildConversationText(messages []conversation.Message) string {
+	var sb strings.Builder
+	for _, msg := range messages {
+		role := "用户"
+		if msg.Role == "assistant" {
+			role = "记录师"
+		}
+		sb.WriteString(fmt.Sprintf("%s：%s\n\n", role, msg.Content))
+	}
+	return sb.String()
+}
+
+func stringValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }

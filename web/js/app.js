@@ -238,7 +238,13 @@ async function selectTopic(topicId, topic, greeting, context, ageStart, ageEnd) 
 
     try {
         // 创建新对话
-        const result = await api.conversation.start();
+        const conversationInput = {};
+        if (topic && topic !== '__free__') {
+            conversationInput.topic = topic;
+            conversationInput.greeting = greeting || '';
+            conversationInput.context = context || '';
+        }
+        const result = await api.conversation.start(conversationInput);
         storage.set('currentConversationId', result.conversation_id);
 
         // 存储选择的话题信息
@@ -295,8 +301,13 @@ async function deleteAccount() {
         return;
     }
 
+    const password = prompt('请输入当前密码以确认注销');
+    if (!password) {
+        return;
+    }
+
     try {
-        await api.user.delete();
+        await api.user.delete(password);
         storage.remove('token');
         storage.remove('userId');
         storage.remove('currentConversationId');

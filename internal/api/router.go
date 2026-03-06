@@ -102,6 +102,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		userRoutes.GET("/memoirs", userHandler.ListMemoirs)
 		userRoutes.GET("/memoirs/:id", userHandler.GetMemoir)
 		userRoutes.PUT("/memoirs/:id", userHandler.UpdateMemoir)
+		userRoutes.POST("/memoirs/:id/regenerate", userHandler.RegenerateMemoir)
 		userRoutes.DELETE("/memoirs/:id", userHandler.DeleteMemoir)
 
 		// 话题
@@ -126,6 +127,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 
 	// WebSocket 实时对话（需要 JWT 认证，通过 query param）
 	api.GET("/realtime/dialog", realtimeHandler.HandleDialog)
+	api.GET("/realtime/preview", realtimeHandler.HandlePreview)
 
 	// 创建 Admin Handler
 	adminHandler := admin.NewHandler(
