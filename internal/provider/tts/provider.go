@@ -48,6 +48,7 @@ type Voice struct {
 // ProviderConfig 提供者配置
 type ProviderConfig struct {
 	AppID     string
-	AccessKey string
+	Token     string   // Bearer Token
+	Cluster   string   // 集群名称
 	Speakers  []string
 }

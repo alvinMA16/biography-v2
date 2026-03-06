@@ -1,40 +1,46 @@
 package doubao
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
 )
 
 const (
-	// WebSocket 服务地址
-	wsURL = "wss://openspeech.bytedance.com/api/v3/sami/podcasttts"
+	// HTTP API 地址
+	apiURL = "https://openspeech.bytedance.com/api/v1/tts"
 
-	// Resource ID
-	resourceID = "volc.service_type.10050"
-
-	// App Key (固定值)
-	appKey = "aGjiRDfUWi"
+	// 默认超时时间
+	defaultTimeout = 30 * time.Second
 )
 
 // Provider 豆包 TTS 提供者
 type Provider struct {
-	appID     string
-	accessKey string
-	speakers  []string
+	appID    string
+	token    string
+	cluster  string
+	speakers []string
+	client   *http.Client
 }
 
 // New 创建豆包 TTS 提供者
 func New(cfg tts.ProviderConfig) (*Provider, error) {
-	if cfg.AppID == "" || cfg.AccessKey == "" {
-		return nil, errors.New("doubao tts: app id and access key are required")
+	if cfg.AppID == "" || cfg.Token == "" {
+		return nil, errors.New("doubao tts: app id and token are required")
+	}
+
+	cluster := cfg.Cluster
+	if cluster == "" {
+		cluster = "volcano_tts"
 	}
 
 	speakers := cfg.Speakers
@@ -46,9 +52,13 @@ func New(cfg tts.ProviderConfig) (*Provider, error) {
 	}
 
 	return &Provider{
-		appID:     cfg.AppID,
-		accessKey: cfg.AccessKey,
-		speakers:  speakers,
+		appID:    cfg.AppID,
+		token:    cfg.Token,
+		cluster:  cluster,
+		speakers: speakers,
+		client: &http.Client{
+			Timeout: defaultTimeout,
+		},
 	}, nil
 }
 
@@ -57,71 +67,166 @@ func (p *Provider) Name() string {
 	return "doubao"
 }
 
-// Synthesize 单次语音合成
-func (p *Provider) Synthesize(ctx context.Context, text string, config tts.SynthesisConfig) ([]byte, error) {
-	ch, err := p.SynthesizeStream(ctx, text, config)
-	if err != nil {
-		return nil, err
-	}
-
-	var audio []byte
-	for chunk := range ch {
-		if chunk.Error != nil {
-			return nil, chunk.Error
-		}
-		audio = append(audio, chunk.Data...)
-	}
-
-	return audio, nil
+// TTSRequest TTS 请求结构
+type TTSRequest struct {
+	App     AppConfig     `json:"app"`
+	User    UserConfig    `json:"user"`
+	Audio   AudioConfig   `json:"audio"`
+	Request RequestConfig `json:"request"`
 }
 
-// SynthesizeStream 流式语音合成
-func (p *Provider) SynthesizeStream(ctx context.Context, text string, config tts.SynthesisConfig) (<-chan tts.AudioChunk, error) {
+type AppConfig struct {
+	AppID   string `json:"appid"`
+	Token   string `json:"token"`
+	Cluster string `json:"cluster"`
+}
+
+type UserConfig struct {
+	UID string `json:"uid"`
+}
+
+type AudioConfig struct {
+	VoiceType   string  `json:"voice_type"`
+	Encoding    string  `json:"encoding"`
+	SpeedRatio  float64 `json:"speed_ratio"`
+	VolumeRatio float64 `json:"volume_ratio"`
+	PitchRatio  float64 `json:"pitch_ratio"`
+}
+
+type RequestConfig struct {
+	ReqID     string `json:"reqid"`
+	Text      string `json:"text"`
+	TextType  string `json:"text_type"`
+	Operation string `json:"operation"`
+}
+
+// TTSResponse TTS 响应结构
+type TTSResponse struct {
+	ReqID     string `json:"reqid"`
+	Code      int    `json:"code"`
+	Message   string `json:"message"`
+	Operation string `json:"operation"`
+	Sequence  int    `json:"sequence"`
+	Data      string `json:"data"`
+}
+
+// Synthesize 单次语音合成
+func (p *Provider) Synthesize(ctx context.Context, text string, config tts.SynthesisConfig) ([]byte, error) {
 	// 准备配置
 	voice := config.Voice
 	if voice == "" {
 		voice = p.speakers[0]
 	}
 
-	format := config.Format
-	if format == "" {
-		format = "pcm"
+	encoding := config.Format
+	if encoding == "" {
+		encoding = "pcm"
+	}
+	// 转换格式名称
+	if encoding == "pcm" {
+		encoding = "pcm"
 	}
 
-	sampleRate := config.SampleRate
-	if sampleRate == 0 {
-		sampleRate = 24000
+	// 计算语速比例 (speed: -50~100 -> speedRatio: 0.5~2.0)
+	speedRatio := 1.0
+	if config.Speed != 0 {
+		speedRatio = 1.0 + float64(config.Speed)/100.0
+		if speedRatio < 0.5 {
+			speedRatio = 0.5
+		}
+		if speedRatio > 2.0 {
+			speedRatio = 2.0
+		}
 	}
 
-	// 建立 WebSocket 连接
-	headers := http.Header{}
-	headers.Set("X-Api-App-Id", p.appID)
-	headers.Set("X-Api-Access-Key", p.accessKey)
-	headers.Set("X-Api-Resource-Id", resourceID)
-	headers.Set("X-Api-App-Key", appKey)
-	headers.Set("X-Api-Request-Id", uuid.New().String())
+	// 构建请求
+	reqID := uuid.New().String()
+	ttsReq := TTSRequest{
+		App: AppConfig{
+			AppID:   p.appID,
+			Token:   "access_token", // 固定值，实际认证用 Header
+			Cluster: p.cluster,
+		},
+		User: UserConfig{
+			UID: "biography-user",
+		},
+		Audio: AudioConfig{
+			VoiceType:   voice,
+			Encoding:    encoding,
+			SpeedRatio:  speedRatio,
+			VolumeRatio: 1.0,
+			PitchRatio:  1.0,
+		},
+		Request: RequestConfig{
+			ReqID:     reqID,
+			Text:      text,
+			TextType:  "plain",
+			Operation: "query",
+		},
+	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, headers)
+	reqBody, err := json.Marshal(ttsReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	sessionID := uuid.New().String()
-	audioChan := make(chan tts.AudioChunk, 100)
-
-	// 启动会话
-	session := &synthesizeSession{
-		conn:       conn,
-		sessionID:  sessionID,
-		text:       text,
-		voice:      voice,
-		format:     format,
-		sampleRate: sampleRate,
-		speed:      config.Speed,
-		audioChan:  audioChan,
+	// 创建 HTTP 请求
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	go session.run(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer;%s", p.token))
+
+	// 发送请求
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// 解析响应
+	var ttsResp TTSResponse
+	if err := json.Unmarshal(respBody, &ttsResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	// 检查响应码 (3000 表示成功)
+	if ttsResp.Code != 3000 {
+		return nil, fmt.Errorf("tts failed: code=%d, message=%s", ttsResp.Code, ttsResp.Message)
+	}
+
+	// Base64 解码音频数据
+	audio, err := base64.StdEncoding.DecodeString(ttsResp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode audio data: %w", err)
+	}
+
+	return audio, nil
+}
+
+// SynthesizeStream 流式语音合成（HTTP 接口不支持真正的流式，返回完整音频作为单个 chunk）
+func (p *Provider) SynthesizeStream(ctx context.Context, text string, config tts.SynthesisConfig) (<-chan tts.AudioChunk, error) {
+	audioChan := make(chan tts.AudioChunk, 1)
+
+	go func() {
+		defer close(audioChan)
+
+		audio, err := p.Synthesize(ctx, text, config)
+		if err != nil {
+			audioChan <- tts.AudioChunk{Error: err}
+			return
+		}
+
+		audioChan <- tts.AudioChunk{Data: audio, Done: true}
+	}()
 
 	return audioChan, nil
 }
@@ -160,162 +265,14 @@ func (p *Provider) ListVoices(ctx context.Context) ([]tts.Voice, error) {
 
 // HealthCheck 健康检查
 func (p *Provider) HealthCheck(ctx context.Context) error {
-	// 尝试建立连接来验证凭据
-	headers := http.Header{}
-	headers.Set("X-Api-App-Id", p.appID)
-	headers.Set("X-Api-Access-Key", p.accessKey)
-	headers.Set("X-Api-Resource-Id", resourceID)
-	headers.Set("X-Api-App-Key", appKey)
-	headers.Set("X-Api-Request-Id", uuid.New().String())
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, headers)
+	// 尝试合成一小段文字来验证凭据
+	_, err := p.Synthesize(ctx, "测试", tts.SynthesisConfig{
+		Voice:  p.speakers[0],
+		Format: "pcm",
+	})
 	if err != nil {
 		return fmt.Errorf("doubao tts: health check failed: %w", err)
 	}
-	conn.Close()
 
 	return nil
-}
-
-// synthesizeSession 合成会话
-type synthesizeSession struct {
-	conn       *websocket.Conn
-	sessionID  string
-	text       string
-	voice      string
-	format     string
-	sampleRate int
-	speed      int
-	audioChan  chan tts.AudioChunk
-	mu         sync.Mutex
-}
-
-// run 运行合成会话
-func (s *synthesizeSession) run(ctx context.Context) {
-	defer close(s.audioChan)
-	defer s.conn.Close()
-
-	// 发送开始请求
-	if err := s.sendStart(); err != nil {
-		s.audioChan <- tts.AudioChunk{Error: err}
-		return
-	}
-
-	// 接收消息
-	s.receiveMessages(ctx)
-
-	// 发送结束请求
-	s.sendFinish()
-}
-
-// sendStart 发送开始请求
-func (s *synthesizeSession) sendStart() error {
-	payload := map[string]interface{}{
-		"input_id":       s.sessionID,
-		"action":         3, // 对话文本直接合成
-		"use_head_music": false,
-		"use_tail_music": false,
-		"audio_config": map[string]interface{}{
-			"format":      s.format,
-			"sample_rate": s.sampleRate,
-			"speech_rate": s.speed,
-		},
-		"nlp_texts": []map[string]interface{}{
-			{
-				"speaker": s.voice,
-				"text":    s.text,
-			},
-		},
-	}
-
-	frame, err := EncodeFrame(s.sessionID, eventSessionStarted, payload)
-	if err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.conn.WriteMessage(websocket.BinaryMessage, frame)
-}
-
-// sendFinish 发送结束请求
-func (s *synthesizeSession) sendFinish() error {
-	frame := EncodeFinishFrame(s.sessionID)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.conn.WriteMessage(websocket.BinaryMessage, frame)
-}
-
-// receiveMessages 接收消息
-func (s *synthesizeSession) receiveMessages(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// 设置读取超时
-		s.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-
-		_, message, err := s.conn.ReadMessage()
-		if err != nil {
-			// 检查是否是正常关闭
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-				return
-			}
-			s.audioChan <- tts.AudioChunk{Error: err}
-			return
-		}
-
-		frame, err := DecodeFrame(message)
-		if err != nil {
-			continue
-		}
-
-		switch frame.EventNumber {
-		case eventSessionStarted:
-			// 会话开始
-
-		case eventPodcastRoundStart:
-			// 轮次开始
-
-		case eventPodcastRoundResp:
-			// 音频数据
-			if len(frame.Payload) > 0 {
-				s.audioChan <- tts.AudioChunk{Data: frame.Payload}
-			}
-
-		case eventPodcastRoundEnd:
-			// 轮次结束
-
-		case eventPodcastEnd:
-			// 播客结束
-
-		case eventSessionFinished:
-			// 会话结束
-			s.audioChan <- tts.AudioChunk{Done: true}
-			return
-
-		case eventConnectionFinished:
-			// 连接关闭
-			return
-
-		case eventUsageResponse:
-			// 用量统计，忽略
-
-		default:
-			// 检查是否有错误
-			if frame.MessageType == msgTypeServerError {
-				resp, _ := ParsePayload(frame.Payload)
-				if resp != nil && resp.StatusCode != 20000000 {
-					s.audioChan <- tts.AudioChunk{
-						Error: fmt.Errorf("server error: %d - %s", resp.StatusCode, resp.StatusMessage),
-					}
-					return
-				}
-			}
-		}
-	}
 }

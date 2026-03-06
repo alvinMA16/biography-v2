@@ -227,15 +227,16 @@ func initASRProvider(cfg *config.Config) asr.Provider {
 
 // initTTSProvider 初始化 TTS 提供者
 func initTTSProvider(cfg *config.Config) tts.Provider {
-	if cfg.DoubaoAppID == "" || cfg.DoubaoAccessKey == "" {
+	if cfg.DoubaoAppID == "" || cfg.DoubaoToken == "" {
 		log.Println("Warning: Doubao TTS not configured")
 		return nil
 	}
 
 	provider, err := doubao.New(tts.ProviderConfig{
-		AppID:     cfg.DoubaoAppID,
-		AccessKey: cfg.DoubaoAccessKey,
-		Speakers:  cfg.DoubaoSpeakers,
+		AppID:    cfg.DoubaoAppID,
+		Token:    cfg.DoubaoToken,
+		Cluster:  cfg.DoubaoCluster,
+		Speakers: cfg.DoubaoSpeakers,
 	})
 	if err != nil {
 		log.Printf("Warning: Failed to initialize Doubao TTS provider: %v", err)
