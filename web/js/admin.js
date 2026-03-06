@@ -143,13 +143,16 @@ const ACTION_LABELS = {
     edit_user: '编辑用户',
     reset_password: '重置密码',
     delete_user: '删除用户',
-    toggle_user_active: '禁用/启用',
+    toggle_active: '禁用/启用',
     create_era_memory: '创建时代记忆',
     update_era_memory: '更新时代记忆',
     delete_era_memory: '删除时代记忆',
-    create_welcome_message: '新增激励语',
-    update_welcome_message: '编辑激励语',
-    delete_welcome_message: '删除激励语',
+    create_welcome: '新增激励语',
+    edit_welcome: '编辑激励语',
+    delete_welcome: '删除激励语',
+    create_preset_topic: '创建预设话题',
+    update_preset_topic: '更新预设话题',
+    delete_preset_topic: '删除预设话题',
 };
 
 async function loadLogs() {

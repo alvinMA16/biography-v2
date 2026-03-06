@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/peizhengma/biography-v2/internal/domain/audit"
 	"github.com/peizhengma/biography-v2/internal/domain/era"
 	"github.com/peizhengma/biography-v2/internal/domain/memoir"
 	"github.com/peizhengma/biography-v2/internal/domain/preset"
@@ -111,6 +112,19 @@ func (h *Handler) CreateUser(c *gin.Context) {
 	}
 
 	fmt.Printf("[CreateUser] Success: user_id=%s\n", u.ID)
+
+	// 记录审计日志
+	if err := h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionCreateUser,
+		TargetType:  audit.TargetTypeUser,
+		TargetID:    &u.ID,
+		TargetLabel: u.Phone,
+		Detail:      map[string]any{"nickname": input.Nickname},
+		IPAddress:   c.ClientIP(),
+	}); err != nil {
+		fmt.Printf("[CreateUser] Audit log error: %v\n", err)
+	}
+
 	c.JSON(http.StatusCreated, u)
 }
 
@@ -196,6 +210,15 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionEditUser,
+		TargetType:  audit.TargetTypeUser,
+		TargetID:    &userID,
+		TargetLabel: user.Phone,
+		IPAddress:   c.ClientIP(),
+	})
+
 	c.JSON(http.StatusOK, user)
 }
 
@@ -207,6 +230,13 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 		return
 	}
 
+	// 先获取用户信息用于审计日志
+	u, _ := h.userService.GetByID(c.Request.Context(), userID)
+	targetLabel := ""
+	if u != nil {
+		targetLabel = u.Phone
+	}
+
 	if err := h.userService.AdminDelete(c.Request.Context(), userID); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, userService.ErrUserNotFound) {
@@ -214,6 +244,17 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 		}
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 记录审计日志
+	if err := h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionDeleteUser,
+		TargetType:  audit.TargetTypeUser,
+		TargetID:    &userID,
+		TargetLabel: targetLabel,
+		IPAddress:   c.ClientIP(),
+	}); err != nil {
+		fmt.Printf("[DeleteUser] Audit log error: %v\n", err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "user deleted"})
@@ -235,6 +276,13 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 
+	// 获取用户信息用于审计日志
+	u, _ := h.userService.GetByID(c.Request.Context(), userID)
+	targetLabel := ""
+	if u != nil {
+		targetLabel = u.Phone
+	}
+
 	if err := h.userService.AdminResetPassword(c.Request.Context(), userID, input.NewPassword); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, userService.ErrUserNotFound) {
@@ -243,6 +291,15 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionResetPassword,
+		TargetType:  audit.TargetTypeUser,
+		TargetID:    &userID,
+		TargetLabel: targetLabel,
+		IPAddress:   c.ClientIP(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "password reset successfully"})
 }
@@ -275,6 +332,16 @@ func (h *Handler) ToggleUserActive(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionToggleActive,
+		TargetType:  audit.TargetTypeUser,
+		TargetID:    &userID,
+		TargetLabel: u.Phone,
+		Detail:      map[string]any{"is_active": u.IsActive},
+		IPAddress:   c.ClientIP(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":   "user status updated",
@@ -1107,6 +1174,15 @@ func (h *Handler) CreateEraMemory(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionCreateEraMemory,
+		TargetType:  audit.TargetTypeEraMemory,
+		TargetID:    &m.ID,
+		TargetLabel: fmt.Sprintf("%d-%d", m.StartYear, m.EndYear),
+		IPAddress:   c.ClientIP(),
+	})
+
 	c.JSON(http.StatusCreated, m)
 }
 
@@ -1134,6 +1210,15 @@ func (h *Handler) UpdateEraMemory(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionUpdateEraMemory,
+		TargetType:  audit.TargetTypeEraMemory,
+		TargetID:    &memoryID,
+		TargetLabel: fmt.Sprintf("%d-%d", m.StartYear, m.EndYear),
+		IPAddress:   c.ClientIP(),
+	})
+
 	c.JSON(http.StatusOK, m)
 }
 
@@ -1153,6 +1238,14 @@ func (h *Handler) DeleteEraMemory(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionDeleteEraMemory,
+		TargetType:  audit.TargetTypeEraMemory,
+		TargetID:    &memoryID,
+		IPAddress:   c.ClientIP(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "era memory deleted"})
 }
@@ -1193,6 +1286,15 @@ func (h *Handler) CreatePresetTopic(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionCreatePresetTopic,
+		TargetType:  audit.TargetTypePresetTopic,
+		TargetID:    &t.ID,
+		TargetLabel: t.Topic,
+		IPAddress:   c.ClientIP(),
+	})
+
 	c.JSON(http.StatusCreated, t)
 }
 
@@ -1220,6 +1322,15 @@ func (h *Handler) UpdatePresetTopic(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionUpdatePresetTopic,
+		TargetType:  audit.TargetTypePresetTopic,
+		TargetID:    &topicID,
+		TargetLabel: t.Topic,
+		IPAddress:   c.ClientIP(),
+	})
+
 	c.JSON(http.StatusOK, t)
 }
 
@@ -1239,6 +1350,14 @@ func (h *Handler) DeletePresetTopic(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionDeletePresetTopic,
+		TargetType:  audit.TargetTypePresetTopic,
+		TargetID:    &topicID,
+		IPAddress:   c.ClientIP(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "preset topic deleted"})
 }
@@ -1278,6 +1397,19 @@ func (h *Handler) CreateWelcomeMessage(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	label := m.Content
+	if len(label) > 30 {
+		label = label[:30] + "..."
+	}
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionCreateWelcome,
+		TargetType:  audit.TargetTypeWelcome,
+		TargetID:    &m.ID,
+		TargetLabel: label,
+		IPAddress:   c.ClientIP(),
+	})
+
 	c.JSON(http.StatusCreated, m)
 }
 
@@ -1305,6 +1437,19 @@ func (h *Handler) UpdateWelcomeMessage(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	label := m.Content
+	if len(label) > 30 {
+		label = label[:30] + "..."
+	}
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionEditWelcome,
+		TargetType:  audit.TargetTypeWelcome,
+		TargetID:    &messageID,
+		TargetLabel: label,
+		IPAddress:   c.ClientIP(),
+	})
+
 	c.JSON(http.StatusOK, m)
 }
 
@@ -1324,6 +1469,14 @@ func (h *Handler) DeleteWelcomeMessage(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 记录审计日志
+	h.auditService.Log(c.Request.Context(), audit.CreateInput{
+		Action:      audit.ActionDeleteWelcome,
+		TargetType:  audit.TargetTypeWelcome,
+		TargetID:    &messageID,
+		IPAddress:   c.ClientIP(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "welcome message deleted"})
 }

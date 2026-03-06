@@ -95,7 +95,8 @@ cmd_start() {
     check_env
     cd "$DEPLOY_DIR"
 
-    docker compose up -d --build
+    docker compose build --no-cache backend
+    docker compose up -d
 
     log_info "等待服务启动..."
     sleep 5
@@ -167,15 +168,13 @@ cmd_backup() {
 cmd_update() {
     log_info "=== 更新部署 ==="
 
-    log_info "拉取最新代码..."
-    git pull origin dev || git pull origin main
-
     log_info "执行数据库迁移..."
     cmd_migrate
 
     log_info "重新构建并启动..."
     cd "$DEPLOY_DIR"
-    docker compose up -d --build
+    docker compose build --no-cache backend
+    docker compose up -d
 
     sleep 5
     if curl -s http://localhost:8000/health > /dev/null 2>&1; then
@@ -184,6 +183,16 @@ cmd_update() {
     else
         log_warn "服务可能仍在启动中"
     fi
+}
+
+# 从远程拉取并更新
+cmd_pull() {
+    log_info "=== 拉取远程代码并更新 ==="
+
+    log_info "拉取最新代码..."
+    git pull origin main || git pull origin dev
+
+    cmd_update
 }
 
 # 显示状态
@@ -206,8 +215,9 @@ cmd_help() {
     echo "  migrate   执行数据库迁移"
     echo "  start     启动服务"
     echo "  stop      停止服务"
-    echo "  restart   重启后端服务"
-    echo "  update    更新部署（拉取代码、迁移、重启）"
+    echo "  restart   重启后端服务（不重新构建）"
+    echo "  update    重新构建并部署（用于本地代码修改）"
+    echo "  pull      从远程拉取代码并更新部署"
     echo "  logs      查看后端日志"
     echo "  backup    备份数据库"
     echo "  status    查看服务状态"
@@ -217,6 +227,10 @@ cmd_help() {
     echo "  1. cp .env.example deploy/.env"
     echo "  2. vim deploy/.env  # 配置环境变量"
     echo "  3. ./deploy.sh init"
+    echo ""
+    echo "更新流程:"
+    echo "  本地修改后: ./deploy.sh update"
+    echo "  从远程更新: ./deploy.sh pull"
 }
 
 # 主入口
@@ -238,6 +252,9 @@ case "${1:-help}" in
         ;;
     update)
         cmd_update
+        ;;
+    pull)
+        cmd_pull
         ;;
     logs)
         cmd_logs

@@ -23,9 +23,15 @@ const (
 	ActionDeleteQuote   Action = "delete_quote"
 	ActionCreateWelcome Action = "create_welcome"
 	ActionEditWelcome   Action = "edit_welcome"
-	ActionDeleteWelcome Action = "delete_welcome"
-	ActionDeleteMemoir  Action = "delete_memoir"
-	ActionEditMemoir    Action = "edit_memoir"
+	ActionDeleteWelcome    Action = "delete_welcome"
+	ActionDeleteMemoir     Action = "delete_memoir"
+	ActionEditMemoir       Action = "edit_memoir"
+	ActionCreateEraMemory  Action = "create_era_memory"
+	ActionUpdateEraMemory  Action = "update_era_memory"
+	ActionDeleteEraMemory  Action = "delete_era_memory"
+	ActionCreatePresetTopic Action = "create_preset_topic"
+	ActionUpdatePresetTopic Action = "update_preset_topic"
+	ActionDeletePresetTopic Action = "delete_preset_topic"
 )
 
 // TargetType 目标类型
