@@ -384,10 +384,10 @@ let eraMemoriesData = [];
 
 async function loadEraMemories() {
     try {
-        const memories = await adminRequest('/admin/era-memories');
-        eraMemoriesData = memories;
+        const resp = await adminRequest('/admin/era-memories');
+        eraMemoriesData = resp.era_memories || [];
         eraMemoriesLoaded = true;
-        renderEraMemoryTable(memories);
+        renderEraMemoryTable(eraMemoriesData);
     } catch (e) {
         document.getElementById('eraMemoryTableBody').innerHTML =
             '<tr><td colspan="4" class="admin-table-empty">加载失败</td></tr>';
@@ -522,10 +522,10 @@ let welcomeMessagesData = [];
 
 async function loadWelcomeMessages() {
     try {
-        const messages = await adminRequest('/admin/welcome-messages');
-        welcomeMessagesData = messages;
+        const resp = await adminRequest('/admin/welcome-messages');
+        welcomeMessagesData = resp.welcome_messages || [];
         welcomeMessagesLoaded = true;
-        renderWelcomeMessageTable(messages);
+        renderWelcomeMessageTable(welcomeMessagesData);
     } catch (e) {
         document.getElementById('welcomeMessageTableBody').innerHTML =
             '<tr><td colspan="5" class="admin-table-empty">加载失败</td></tr>';
@@ -939,8 +939,10 @@ function renderUserDetail(detail) {
     document.getElementById('detailMainCity').textContent = detail.main_city || '-';
 
     // 回忆列表
-    document.getElementById('memoirCount').textContent = detail.memoirs.length;
-    renderMemoirList(detail.memoirs, detail.conversations);
+    const memoirs = detail.memoirs || [];
+    const conversations = detail.conversations || [];
+    document.getElementById('memoirCount').textContent = memoirs.length;
+    renderMemoirList(memoirs, conversations);
 
     // 使用统计
     renderUserStats(detail.stats);
@@ -1020,14 +1022,12 @@ function renderTopicPool(topics) {
 
     container.innerHTML = `<div class="admin-topic-list">
         ${topics.map(t => {
-            const ageText = formatAgeRange(t.age_start, t.age_end);
             return `
                 <div class="admin-topic-item">
                     <div class="admin-topic-item-header">
-                        <div class="admin-topic-title">${escapeHtml(t.topic)}</div>
-                        ${ageText ? `<span class="admin-topic-age">${ageText}</span>` : ''}
+                        <div class="admin-topic-title">${escapeHtml(t.title)}</div>
                     </div>
-                    <div class="admin-topic-greeting">${escapeHtml(t.greeting)}</div>
+                    <div class="admin-topic-greeting">${escapeHtml(t.greeting || '')}</div>
                 </div>
             `;
         }).join('')}
@@ -1105,7 +1105,7 @@ function renderMemoirList(memoirs, conversations) {
     // 按年代分组
     const grouped = {};
     memoirs.forEach(m => {
-        const decade = m.year_start ? `${Math.floor(m.year_start / 10) * 10}年代` : '未知时期';
+        const decade = m.start_year ? `${Math.floor(m.start_year / 10) * 10}年代` : '未知时期';
         if (!grouped[decade]) grouped[decade] = [];
         grouped[decade].push(m);
     });
@@ -1124,8 +1124,8 @@ function renderMemoirList(memoirs, conversations) {
                 <div class="admin-timeline-items">
                     ${grouped[decade].map(m => {
                         const isGenerating = m.status === 'generating';
-                        const yearText = formatYearRange(m.year_start, m.year_end, m.time_period);
-                        const timeText = formatTimeRange(m.conversation_start, m.conversation_end);
+                        const yearText = formatYearRange(m.start_year, m.end_year, m.time_period);
+                        const timeText = m.created_at ? formatDate(m.created_at) : '';
 
                         return `
                             <div class="admin-timeline-item ${isGenerating ? 'generating' : ''}" onclick="showMemoirDetail('${m.id}')">
@@ -1204,8 +1204,8 @@ function showMemoirDetail(memoirId) {
     document.getElementById('memoirDetailTitle').textContent = memoir.title;
 
     // 设置元信息
-    const yearText = formatYearRange(memoir.year_start, memoir.year_end, memoir.time_period);
-    const timeText = formatTimeRange(memoir.conversation_start, memoir.conversation_end);
+    const yearText = formatYearRange(memoir.start_year, memoir.end_year, memoir.time_period);
+    const timeText = memoir.created_at ? formatDate(memoir.created_at) : '';
     let metaHtml = '';
     if (yearText) metaHtml += `<span class="meta-year">${yearText}</span>`;
     if (timeText) metaHtml += `<span class="meta-time">${timeText}</span>`;
@@ -1264,10 +1264,10 @@ let presetTopicsData = [];
 
 async function loadPresetTopics() {
     try {
-        const topics = await adminRequest('/admin/preset-topics');
-        presetTopicsData = topics;
+        const resp = await adminRequest('/admin/preset-topics');
+        presetTopicsData = resp.preset_topics || [];
         presetTopicsLoaded = true;
-        renderPresetTopicTable(topics);
+        renderPresetTopicTable(presetTopicsData);
     } catch (e) {
         document.getElementById('presetTopicTableBody').innerHTML =
             '<tr><td colspan="5" class="admin-table-empty">加载失败</td></tr>';

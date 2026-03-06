@@ -349,7 +349,7 @@ func (h *Handler) ToggleUserActive(c *gin.Context) {
 	})
 }
 
-// GetUserStats 获取用户统计信息
+// GetUserStats 获取用户统计信息（包含详细数据）
 func (h *Handler) GetUserStats(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -370,44 +370,80 @@ func (h *Handler) GetUserStats(c *gin.Context) {
 		return
 	}
 
-	// 获取对话数量
-	conversations, totalConv, _ := h.convService.AdminList(ctx, &userID, nil, 1000, 0)
+	// 获取对话列表（包含消息）
+	conversations, _, _ := h.convService.AdminList(ctx, &userID, nil, 1000, 0)
 
-	// 获取回忆录数量
-	memoirCount, _ := h.memoirService.Count(ctx, userID)
+	// 获取回忆录列表
+	memoirs, _ := h.memoirService.ListByUserID(ctx, userID)
 
-	// 获取话题数量
-	availableTopics, _ := h.topicService.GetAvailableCount(ctx, userID)
-	pendingTopics, _ := h.topicService.GetPendingCount(ctx, userID)
+	// 获取话题池
+	topicPool, _ := h.topicService.GetTopicOptions(ctx, userID, 100)
 
-	// 统计对话状态
-	activeConv := 0
-	completedConv := 0
+	// 计算统计数据
+	totalMessages := 0
+	totalDurationMins := 0.0
 	for _, conv := range conversations {
-		if conv.Status == "active" {
-			activeConv++
-		} else if conv.Status == "completed" {
-			completedConv++
+		totalMessages += conv.MessageCount
+		if conv.UpdatedAt.After(conv.CreatedAt) {
+			totalDurationMins += conv.UpdatedAt.Sub(conv.CreatedAt).Minutes()
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"user": u,
+	totalMemoirChars := 0
+	lifeStages := make(map[string]int)
+	for _, m := range memoirs {
+		totalMemoirChars += len(m.Content)
+		if m.TimePeriod != nil && *m.TimePeriod != "" {
+			lifeStages[*m.TimePeriod]++
+		}
+	}
+
+	avgDuration := 0.0
+	avgMessages := 0.0
+	convToMemoirRate := 0.0
+	avgMemoirLen := 0
+	if len(conversations) > 0 {
+		avgDuration = totalDurationMins / float64(len(conversations))
+		avgMessages = float64(totalMessages) / float64(len(conversations))
+		convToMemoirRate = float64(len(memoirs)) / float64(len(conversations))
+	}
+	if len(memoirs) > 0 {
+		avgMemoirLen = totalMemoirChars / len(memoirs)
+	}
+
+	// 返回扁平化的结构（前端期望的格式）
+	result := gin.H{
+		"id":                u.ID,
+		"phone":             u.Phone,
+		"nickname":          u.Nickname,
+		"preferred_name":    u.PreferredName,
+		"gender":            u.Gender,
+		"birth_year":        u.BirthYear,
+		"hometown":          u.Hometown,
+		"main_city":         u.MainCity,
+		"profile_completed": u.ProfileCompleted,
+		"is_active":         u.IsActive,
+		"era_memories":      u.EraMemories,
+		"created_at":        u.CreatedAt,
+		"updated_at":        u.UpdatedAt,
+		"conversations":     conversations,
+		"memoirs":           memoirs,
+		"topic_pool":        topicPool,
 		"stats": gin.H{
-			"conversations": gin.H{
-				"total":     totalConv,
-				"active":    activeConv,
-				"completed": completedConv,
-			},
-			"memoirs": gin.H{
-				"total": memoirCount,
-			},
-			"topics": gin.H{
-				"available": availableTopics,
-				"pending":   pendingTopics,
-			},
+			"total_conversations":            len(conversations),
+			"total_memoirs":                  len(memoirs),
+			"total_messages":                 totalMessages,
+			"total_duration_mins":            totalDurationMins,
+			"total_memoir_chars":             totalMemoirChars,
+			"avg_conversation_duration_mins": avgDuration,
+			"avg_messages_per_conversation":  avgMessages,
+			"conversation_to_memoir_rate":    convToMemoirRate,
+			"avg_memoir_length":              avgMemoirLen,
+			"life_stages_coverage":           lifeStages,
 		},
-	})
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // --- 对话管理 ---
