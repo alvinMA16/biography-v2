@@ -202,6 +202,53 @@ const api = {
     },
 };
 
+// Toast 提示工具
+const toast = {
+    _container: null,
+
+    _getContainer() {
+        if (!this._container) {
+            this._container = document.createElement('div');
+            this._container.className = 'toast';
+            document.body.appendChild(this._container);
+        }
+        return this._container;
+    },
+
+    show(message, type = 'info', duration = 3000) {
+        const container = this._getContainer();
+        container.textContent = message;
+        container.className = `toast toast-${type}`;
+
+        // 移除之前的动画类
+        container.classList.remove('hide');
+
+        // 显示
+        requestAnimationFrame(() => {
+            container.classList.add('show');
+        });
+
+        // 自动隐藏
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = setTimeout(() => {
+            container.classList.add('hide');
+            container.classList.remove('show');
+        }, duration);
+    },
+
+    success(message, duration = 3000) {
+        this.show(message, 'success', duration);
+    },
+
+    error(message, duration = 4000) {
+        this.show(message, 'error', duration);
+    },
+
+    info(message, duration = 3000) {
+        this.show(message, 'info', duration);
+    }
+};
+
 // 本地存储工具
 const storage = {
     get(key) {

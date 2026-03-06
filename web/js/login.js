@@ -16,7 +16,7 @@ async function handleLogin(event) {
     errorEl.textContent = '';
 
     if (!phone || !password) {
-        errorEl.textContent = '请输入手机号和密码';
+        toast.error('请输入手机号和密码');
         return;
     }
 
@@ -30,11 +30,29 @@ async function handleLogin(event) {
         storage.set('token', data.token);
         storage.set('userId', data.user.id);
 
-        // 跳转首页
-        window.location.href = 'index.html';
+        // 显示成功提示
+        toast.success('登录成功，正在跳转...');
+
+        // 延迟跳转，让用户看到提示
+        setTimeout(() => {
+            window.location.href = 'index.html';
+        }, 800);
     } catch (error) {
-        errorEl.textContent = error.message || '登录失败，请重试';
-    } finally {
+        // 根据错误类型显示友好提示
+        let errorMsg = '登录失败，请稍后重试';
+        if (error.message) {
+            const msg = error.message.toLowerCase();
+            if (msg.includes('invalid phone or password') || msg.includes('密码') || msg.includes('credentials')) {
+                errorMsg = '手机号或密码不正确，请检查后重试';
+            } else if (msg.includes('not found') || msg.includes('不存在')) {
+                errorMsg = '该手机号尚未注册';
+            } else if (msg.includes('network') || msg.includes('fetch')) {
+                errorMsg = '网络连接失败，请检查网络后重试';
+            } else {
+                errorMsg = error.message;
+            }
+        }
+        toast.error(errorMsg);
         btn.disabled = false;
         btn.textContent = '登录';
     }
