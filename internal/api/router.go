@@ -68,7 +68,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	})
 
 	// 创建 User Handler
-	userHandler := user.NewHandler(deps.UserService, deps.ConversationService, deps.MemoirService, deps.TopicService, deps.FlowService, deps.LLMService, deps.WelcomeService)
+	userHandler := user.NewHandler(deps.UserService, deps.ConversationService, deps.MemoirService, deps.TopicService, deps.PresetService, deps.FlowService, deps.LLMService, deps.WelcomeService)
 
 	// API 路由组
 	api := r.Group("/api")

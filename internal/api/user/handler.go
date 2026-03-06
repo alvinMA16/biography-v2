@@ -15,11 +15,13 @@ import (
 
 	"github.com/peizhengma/biography-v2/internal/domain/conversation"
 	"github.com/peizhengma/biography-v2/internal/domain/memoir"
+	"github.com/peizhengma/biography-v2/internal/domain/topic"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	flowService "github.com/peizhengma/biography-v2/internal/service/flow"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
+	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
@@ -31,18 +33,20 @@ type Handler struct {
 	convService    *convService.Service
 	memoirService  *memoirService.Service
 	topicService   *topicService.Service
+	presetService  *presetService.Service
 	flowService    *flowService.Service
 	llmService     *llmService.Service
 	welcomeService *welcomeService.Service
 }
 
 // NewHandler 创建 Handler
-func NewHandler(userSvc *userService.Service, convSvc *convService.Service, memoirSvc *memoirService.Service, topicSvc *topicService.Service, flowSvc *flowService.Service, llmSvc *llmService.Service, welcomeSvc *welcomeService.Service) *Handler {
+func NewHandler(userSvc *userService.Service, convSvc *convService.Service, memoirSvc *memoirService.Service, topicSvc *topicService.Service, presetSvc *presetService.Service, flowSvc *flowService.Service, llmSvc *llmService.Service, welcomeSvc *welcomeService.Service) *Handler {
 	return &Handler{
 		userService:    userSvc,
 		convService:    convSvc,
 		memoirService:  memoirSvc,
 		topicService:   topicSvc,
+		presetService:  presetSvc,
 		flowService:    flowSvc,
 		llmService:     llmSvc,
 		welcomeService: welcomeSvc,
@@ -582,10 +586,44 @@ func (h *Handler) GetTopicOptions(c *gin.Context) {
 	// 解析数量参数
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "8"))
 
+	// 先获取用户个性化话题
 	options, err := h.topicService.GetTopicOptions(c.Request.Context(), userID, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 如果用户话题不足，补充预设话题
+	if len(options) < limit {
+		presets, err := h.presetService.GetActiveTopics(c.Request.Context())
+		if err == nil && len(presets) > 0 {
+			// 记录已有话题标题，避免重复
+			existingTitles := make(map[string]bool)
+			for _, opt := range options {
+				existingTitles[opt.Title] = true
+			}
+
+			// 补充预设话题
+			for _, p := range presets {
+				if len(options) >= limit {
+					break
+				}
+				// 跳过重复标题
+				if existingTitles[p.Topic] {
+					continue
+				}
+				context := ""
+				if p.ChatContext != nil {
+					context = *p.ChatContext
+				}
+				options = append(options, topic.TopicOption{
+					ID:       p.ID,
+					Title:    p.Topic,
+					Greeting: p.Greeting,
+					Context:  context,
+				})
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
