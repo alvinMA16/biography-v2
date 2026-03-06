@@ -155,6 +155,22 @@ const ACTION_LABELS = {
     delete_preset_topic: '删除预设话题',
 };
 
+function formatLogDetail(detail) {
+    if (!detail || Object.keys(detail).length === 0) return '-';
+
+    const parts = [];
+    if (detail.nickname) parts.push(`昵称: ${detail.nickname}`);
+    if (detail.is_active !== undefined) parts.push(detail.is_active ? '启用' : '禁用');
+
+    // 如果有其他未处理的字段，显示简单格式
+    if (parts.length === 0) {
+        return Object.entries(detail)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ');
+    }
+    return parts.join(', ');
+}
+
 async function loadLogs() {
     try {
         const data = await adminRequest('/admin/logs');
@@ -177,12 +193,13 @@ function renderLogTable(logs) {
             ? new Date(log.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
             : '-';
         const actionLabel = ACTION_LABELS[log.action] || log.action;
+        const detailText = formatLogDetail(log.detail);
         return `
             <tr>
                 <td>${time}</td>
                 <td><span class="admin-log-action admin-log-${log.action}">${actionLabel}</span></td>
                 <td>${log.target_label || '-'}</td>
-                <td class="admin-log-detail">${log.detail || '-'}</td>
+                <td class="admin-log-detail">${detailText}</td>
             </tr>
         `;
     }).join('');
