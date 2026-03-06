@@ -68,7 +68,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 	})
 
 	// 创建 User Handler
-	userHandler := user.NewHandler(deps.UserService, deps.ConversationService, deps.MemoirService, deps.TopicService, deps.FlowService, deps.LLMService)
+	userHandler := user.NewHandler(deps.UserService, deps.ConversationService, deps.MemoirService, deps.TopicService, deps.FlowService, deps.LLMService, deps.WelcomeService)
 
 	// API 路由组
 	api := r.Group("/api")
@@ -106,6 +106,9 @@ func NewRouter(deps *RouterDeps) http.Handler {
 
 		// 话题
 		userRoutes.GET("/topics", userHandler.GetTopicOptions)
+
+		// 激励语
+		userRoutes.GET("/user/welcome-messages", userHandler.GetWelcomeMessages)
 	}
 
 	// 创建 Realtime Handler

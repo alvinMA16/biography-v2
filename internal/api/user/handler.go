@@ -20,27 +20,30 @@ import (
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
+	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
 )
 
 // Handler 用户 API 处理器
 type Handler struct {
-	userService   *userService.Service
-	convService   *convService.Service
-	memoirService *memoirService.Service
-	topicService  *topicService.Service
-	flowService   *flowService.Service
-	llmService    *llmService.Service
+	userService    *userService.Service
+	convService    *convService.Service
+	memoirService  *memoirService.Service
+	topicService   *topicService.Service
+	flowService    *flowService.Service
+	llmService     *llmService.Service
+	welcomeService *welcomeService.Service
 }
 
 // NewHandler 创建 Handler
-func NewHandler(userSvc *userService.Service, convSvc *convService.Service, memoirSvc *memoirService.Service, topicSvc *topicService.Service, flowSvc *flowService.Service, llmSvc *llmService.Service) *Handler {
+func NewHandler(userSvc *userService.Service, convSvc *convService.Service, memoirSvc *memoirService.Service, topicSvc *topicService.Service, flowSvc *flowService.Service, llmSvc *llmService.Service, welcomeSvc *welcomeService.Service) *Handler {
 	return &Handler{
-		userService:   userSvc,
-		convService:   convSvc,
-		memoirService: memoirSvc,
-		topicService:  topicSvc,
-		flowService:   flowSvc,
-		llmService:    llmSvc,
+		userService:    userSvc,
+		convService:    convSvc,
+		memoirService:  memoirSvc,
+		topicService:   topicSvc,
+		flowService:    flowSvc,
+		llmService:     llmSvc,
+		welcomeService: welcomeSvc,
 	}
 }
 
@@ -108,6 +111,26 @@ func (h *Handler) GetProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, u)
+}
+
+// GetWelcomeMessages 获取激励语列表（用于首页显示）
+func (h *Handler) GetWelcomeMessages(c *gin.Context) {
+	messages, err := h.welcomeService.GetActive(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 返回简化的结构
+	result := make([]gin.H, 0, len(messages))
+	for _, m := range messages {
+		result = append(result, gin.H{
+			"content":       m.Content,
+			"show_greeting": m.ShowGreeting,
+		})
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // UpdateProfile 更新用户信息
