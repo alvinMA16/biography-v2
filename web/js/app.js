@@ -484,6 +484,10 @@ async function playRecorderGreeting(gender) {
 
     try {
         previewAudioContext = new AudioContext({ sampleRate: 24000 });
+        // 确保 AudioContext 处于运行状态（现代浏览器自动播放策略要求）
+        if (previewAudioContext.state === 'suspended') {
+            await previewAudioContext.resume();
+        }
 
         previewWs = new WebSocket(wsUrl);
 
