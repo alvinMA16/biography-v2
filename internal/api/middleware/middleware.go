@@ -81,7 +81,7 @@ func JWTAuth(secret string) gin.HandlerFunc {
 			return
 		}
 
-		userID, ok := claims["user_id"].(string)
+		userID, ok := claims["sub"].(string)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的令牌"})
 			c.Abort()
