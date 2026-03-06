@@ -42,11 +42,11 @@ type Config struct {
 	AliyunAccessKeySecret string
 	AliyunASRAppKey       string
 
-	// TTS (豆包)
-	DoubaoAppID    string
-	DoubaoToken    string
-	DoubaoCluster  string
-	DoubaoSpeakers []string
+	// TTS (豆包 V3 API)
+	DoubaoAppID      string
+	DoubaoAccessKey  string
+	DoubaoResourceID string
+	DoubaoSpeakers   []string
 }
 
 // Load 从环境变量加载配置
@@ -78,10 +78,10 @@ func Load() (*Config, error) {
 		AliyunAccessKeySecret: getEnv("ALIYUN_ACCESS_KEY_SECRET", ""),
 		AliyunASRAppKey:       getEnv("ALIYUN_ASR_APP_KEY", ""),
 
-		DoubaoAppID:    getEnv("DOUBAO_APP_ID", ""),
-		DoubaoToken:    getEnv("DOUBAO_TOKEN", ""),
-		DoubaoCluster:  getEnv("DOUBAO_CLUSTER", "volcano_tts"),
-		DoubaoSpeakers: getEnvList("DOUBAO_SPEAKERS", []string{"zh_male_dayixiansheng_v2_saturn_bigtts", "zh_female_mizaitongxue_v2_saturn_bigtts"}),
+		DoubaoAppID:      getEnv("DOUBAO_APP_ID", ""),
+		DoubaoAccessKey:  getEnv("DOUBAO_ACCESS_KEY", ""),
+		DoubaoResourceID: getEnv("DOUBAO_RESOURCE_ID", "seed-tts-1.0"),
+		DoubaoSpeakers:   getEnvList("DOUBAO_SPEAKERS", []string{"zh_male_dayixiansheng_v2_saturn_bigtts", "zh_female_mizaitongxue_v2_saturn_bigtts"}),
 	}
 
 	return cfg, nil

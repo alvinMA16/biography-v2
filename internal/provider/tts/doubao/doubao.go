@@ -1,13 +1,13 @@
 package doubao
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -16,31 +16,34 @@ import (
 )
 
 const (
-	// HTTP API 地址
-	apiURL = "https://openspeech.bytedance.com/api/v1/tts"
+	// V3 HTTP Chunked API 地址
+	apiURL = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
 
 	// 默认超时时间
 	defaultTimeout = 30 * time.Second
+
+	// 默认资源 ID
+	defaultResourceID = "seed-tts-1.0"
 )
 
 // Provider 豆包 TTS 提供者
 type Provider struct {
-	appID    string
-	token    string
-	cluster  string
-	speakers []string
-	client   *http.Client
+	appID      string
+	accessKey  string
+	resourceID string
+	speakers   []string
+	client     *http.Client
 }
 
 // New 创建豆包 TTS 提供者
 func New(cfg tts.ProviderConfig) (*Provider, error) {
-	if cfg.AppID == "" || cfg.Token == "" {
-		return nil, errors.New("doubao tts: app id and token are required")
+	if cfg.AppID == "" || cfg.AccessKey == "" {
+		return nil, errors.New("doubao tts: app id and access key are required")
 	}
 
-	cluster := cfg.Cluster
-	if cluster == "" {
-		cluster = "volcano_tts"
+	resourceID := cfg.ResourceID
+	if resourceID == "" {
+		resourceID = defaultResourceID
 	}
 
 	speakers := cfg.Speakers
@@ -52,10 +55,10 @@ func New(cfg tts.ProviderConfig) (*Provider, error) {
 	}
 
 	return &Provider{
-		appID:    cfg.AppID,
-		token:    cfg.Token,
-		cluster:  cluster,
-		speakers: speakers,
+		appID:      cfg.AppID,
+		accessKey:  cfg.AccessKey,
+		resourceID: resourceID,
+		speakers:   speakers,
 		client: &http.Client{
 			Timeout: defaultTimeout,
 		},
@@ -67,47 +70,33 @@ func (p *Provider) Name() string {
 	return "doubao"
 }
 
-// TTSRequest TTS 请求结构
-type TTSRequest struct {
-	App     AppConfig     `json:"app"`
-	User    UserConfig    `json:"user"`
-	Audio   AudioConfig   `json:"audio"`
-	Request RequestConfig `json:"request"`
+// V3Request V3 API 请求结构
+type V3Request struct {
+	User      V3User      `json:"user"`
+	ReqParams V3ReqParams `json:"req_params"`
 }
 
-type AppConfig struct {
-	AppID   string `json:"appid"`
-	Token   string `json:"token"`
-	Cluster string `json:"cluster"`
-}
-
-type UserConfig struct {
+type V3User struct {
 	UID string `json:"uid"`
 }
 
-type AudioConfig struct {
-	VoiceType   string  `json:"voice_type"`
-	Encoding    string  `json:"encoding"`
-	SpeedRatio  float64 `json:"speed_ratio"`
-	VolumeRatio float64 `json:"volume_ratio"`
-	PitchRatio  float64 `json:"pitch_ratio"`
+type V3ReqParams struct {
+	Text        string        `json:"text"`
+	Speaker     string        `json:"speaker"`
+	AudioParams V3AudioParams `json:"audio_params"`
 }
 
-type RequestConfig struct {
-	ReqID     string `json:"reqid"`
-	Text      string `json:"text"`
-	TextType  string `json:"text_type"`
-	Operation string `json:"operation"`
+type V3AudioParams struct {
+	Format     string `json:"format"`
+	SampleRate int    `json:"sample_rate"`
+	SpeechRate int    `json:"speech_rate,omitempty"`
 }
 
-// TTSResponse TTS 响应结构
-type TTSResponse struct {
-	ReqID     string `json:"reqid"`
-	Code      int    `json:"code"`
-	Message   string `json:"message"`
-	Operation string `json:"operation"`
-	Sequence  int    `json:"sequence"`
-	Data      string `json:"data"`
+// V3Response V3 API 响应结构
+type V3Response struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    string `json:"data"`
 }
 
 // Synthesize 单次语音合成
@@ -118,54 +107,33 @@ func (p *Provider) Synthesize(ctx context.Context, text string, config tts.Synth
 		voice = p.speakers[0]
 	}
 
-	encoding := config.Format
-	if encoding == "" {
-		encoding = "pcm"
-	}
-	// 转换格式名称
-	if encoding == "pcm" {
-		encoding = "pcm"
+	format := config.Format
+	if format == "" {
+		format = "pcm"
 	}
 
-	// 计算语速比例 (speed: -50~100 -> speedRatio: 0.5~2.0)
-	speedRatio := 1.0
-	if config.Speed != 0 {
-		speedRatio = 1.0 + float64(config.Speed)/100.0
-		if speedRatio < 0.5 {
-			speedRatio = 0.5
-		}
-		if speedRatio > 2.0 {
-			speedRatio = 2.0
-		}
+	sampleRate := config.SampleRate
+	if sampleRate == 0 {
+		sampleRate = 24000
 	}
 
 	// 构建请求
-	reqID := uuid.New().String()
-	ttsReq := TTSRequest{
-		App: AppConfig{
-			AppID:   p.appID,
-			Token:   "access_token", // 固定值，实际认证用 Header
-			Cluster: p.cluster,
-		},
-		User: UserConfig{
+	v3Req := V3Request{
+		User: V3User{
 			UID: "biography-user",
 		},
-		Audio: AudioConfig{
-			VoiceType:   voice,
-			Encoding:    encoding,
-			SpeedRatio:  speedRatio,
-			VolumeRatio: 1.0,
-			PitchRatio:  1.0,
-		},
-		Request: RequestConfig{
-			ReqID:     reqID,
-			Text:      text,
-			TextType:  "plain",
-			Operation: "query",
+		ReqParams: V3ReqParams{
+			Text:    text,
+			Speaker: voice,
+			AudioParams: V3AudioParams{
+				Format:     format,
+				SampleRate: sampleRate,
+				SpeechRate: config.Speed,
+			},
 		},
 	}
 
-	reqBody, err := json.Marshal(ttsReq)
+	reqBody, err := json.Marshal(v3Req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -176,8 +144,12 @@ func (p *Provider) Synthesize(ctx context.Context, text string, config tts.Synth
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// 设置 V3 API Headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer;%s", p.token))
+	req.Header.Set("X-Api-App-Id", p.appID)
+	req.Header.Set("X-Api-Access-Key", p.accessKey)
+	req.Header.Set("X-Api-Resource-Id", p.resourceID)
+	req.Header.Set("X-Api-Request-Id", uuid.New().String())
 
 	// 发送请求
 	resp, err := p.client.Do(req)
@@ -186,46 +158,162 @@ func (p *Provider) Synthesize(ctx context.Context, text string, config tts.Synth
 	}
 	defer resp.Body.Close()
 
-	// 读取响应
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tts request failed with status: %d", resp.StatusCode)
+	}
+
+	// 读取流式响应，拼接所有音频数据
+	var audioData []byte
+	scanner := bufio.NewScanner(resp.Body)
+	// 增大 buffer 以处理大的音频数据块
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var v3Resp V3Response
+		if err := json.Unmarshal(line, &v3Resp); err != nil {
+			// 跳过无法解析的行
+			continue
+		}
+
+		// code=0 表示音频数据，code=20000000 表示结束
+		if v3Resp.Code == 0 && v3Resp.Data != "" {
+			chunk, err := base64.StdEncoding.DecodeString(v3Resp.Data)
+			if err != nil {
+				continue
+			}
+			audioData = append(audioData, chunk...)
+		} else if v3Resp.Code == 20000000 {
+			// 合成完成
+			break
+		} else if v3Resp.Code != 0 && v3Resp.Code != 20000000 {
+			// 错误响应
+			return nil, fmt.Errorf("tts failed: code=%d, message=%s", v3Resp.Code, v3Resp.Message)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// 解析响应
-	var ttsResp TTSResponse
-	if err := json.Unmarshal(respBody, &ttsResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	if len(audioData) == 0 {
+		return nil, errors.New("no audio data received")
 	}
 
-	// 检查响应码 (3000 表示成功)
-	if ttsResp.Code != 3000 {
-		return nil, fmt.Errorf("tts failed: code=%d, message=%s", ttsResp.Code, ttsResp.Message)
-	}
-
-	// Base64 解码音频数据
-	audio, err := base64.StdEncoding.DecodeString(ttsResp.Data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode audio data: %w", err)
-	}
-
-	return audio, nil
+	return audioData, nil
 }
 
-// SynthesizeStream 流式语音合成（HTTP 接口不支持真正的流式，返回完整音频作为单个 chunk）
+// SynthesizeStream 流式语音合成
 func (p *Provider) SynthesizeStream(ctx context.Context, text string, config tts.SynthesisConfig) (<-chan tts.AudioChunk, error) {
-	audioChan := make(chan tts.AudioChunk, 1)
+	audioChan := make(chan tts.AudioChunk, 10)
 
 	go func() {
 		defer close(audioChan)
 
-		audio, err := p.Synthesize(ctx, text, config)
+		// 准备配置
+		voice := config.Voice
+		if voice == "" {
+			voice = p.speakers[0]
+		}
+
+		format := config.Format
+		if format == "" {
+			format = "pcm"
+		}
+
+		sampleRate := config.SampleRate
+		if sampleRate == 0 {
+			sampleRate = 24000
+		}
+
+		// 构建请求
+		v3Req := V3Request{
+			User: V3User{
+				UID: "biography-user",
+			},
+			ReqParams: V3ReqParams{
+				Text:    text,
+				Speaker: voice,
+				AudioParams: V3AudioParams{
+					Format:     format,
+					SampleRate: sampleRate,
+					SpeechRate: config.Speed,
+				},
+			},
+		}
+
+		reqBody, err := json.Marshal(v3Req)
 		if err != nil {
-			audioChan <- tts.AudioChunk{Error: err}
+			audioChan <- tts.AudioChunk{Error: fmt.Errorf("failed to marshal request: %w", err)}
 			return
 		}
 
-		audioChan <- tts.AudioChunk{Data: audio, Done: true}
+		// 创建 HTTP 请求
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(reqBody))
+		if err != nil {
+			audioChan <- tts.AudioChunk{Error: fmt.Errorf("failed to create request: %w", err)}
+			return
+		}
+
+		// 设置 V3 API Headers
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Api-App-Id", p.appID)
+		req.Header.Set("X-Api-Access-Key", p.accessKey)
+		req.Header.Set("X-Api-Resource-Id", p.resourceID)
+		req.Header.Set("X-Api-Request-Id", uuid.New().String())
+
+		// 发送请求
+		resp, err := p.client.Do(req)
+		if err != nil {
+			audioChan <- tts.AudioChunk{Error: fmt.Errorf("failed to send request: %w", err)}
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			audioChan <- tts.AudioChunk{Error: fmt.Errorf("tts request failed with status: %d", resp.StatusCode)}
+			return
+		}
+
+		// 流式读取响应
+		scanner := bufio.NewScanner(resp.Body)
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+
+			var v3Resp V3Response
+			if err := json.Unmarshal(line, &v3Resp); err != nil {
+				continue
+			}
+
+			if v3Resp.Code == 0 && v3Resp.Data != "" {
+				chunk, err := base64.StdEncoding.DecodeString(v3Resp.Data)
+				if err != nil {
+					continue
+				}
+				audioChan <- tts.AudioChunk{Data: chunk}
+			} else if v3Resp.Code == 20000000 {
+				audioChan <- tts.AudioChunk{Done: true}
+				return
+			} else if v3Resp.Code != 0 && v3Resp.Code != 20000000 {
+				audioChan <- tts.AudioChunk{Error: fmt.Errorf("tts failed: code=%d, message=%s", v3Resp.Code, v3Resp.Message)}
+				return
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			audioChan <- tts.AudioChunk{Error: fmt.Errorf("failed to read response: %w", err)}
+		}
 	}()
 
 	return audioChan, nil

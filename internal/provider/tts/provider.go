@@ -47,8 +47,8 @@ type Voice struct {
 
 // ProviderConfig 提供者配置
 type ProviderConfig struct {
-	AppID     string
-	Token     string   // Bearer Token
-	Cluster   string   // 集群名称
-	Speakers  []string
+	AppID      string
+	AccessKey  string   // Access Token (X-Api-Access-Key)
+	ResourceID string   // 资源 ID (如 seed-tts-1.0)
+	Speakers   []string
 }
