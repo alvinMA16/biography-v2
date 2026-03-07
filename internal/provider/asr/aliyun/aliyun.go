@@ -138,6 +138,8 @@ func (p *Provider) TranscribeStream(ctx context.Context, audioStream <-chan []by
 		config:      p.config,
 		audioStream: audioStream,
 		resultChan:  resultChan,
+		readyCh:     make(chan struct{}),
+		stopSendCh:  make(chan struct{}),
 	}
 
 	go session.run(ctx)
@@ -165,6 +167,10 @@ type transcribeSession struct {
 	audioStream <-chan []byte
 	resultChan  chan asr.Result
 	mu          sync.Mutex
+	readyCh     chan struct{}
+	stopSendCh  chan struct{}
+	readyOnce   sync.Once
+	stopOnce    sync.Once
 	audioChunks int
 	audioBytes  int
 }
@@ -173,6 +179,7 @@ type transcribeSession struct {
 func (s *transcribeSession) run(ctx context.Context) {
 	defer close(s.resultChan)
 	defer s.conn.Close()
+	defer s.signalStopSend()
 	log.Printf("[AliyunASR] 会话启动: task_id=%s", s.taskID)
 
 	// 发送开始命令
@@ -260,10 +267,25 @@ func newTaskID() string {
 
 // sendAudio 发送音频数据
 func (s *transcribeSession) sendAudio(ctx context.Context) {
+	// 等待服务端确认可以接收二进制音频，避免 ROUTING 状态下写入被拒绝。
+	select {
+	case <-ctx.Done():
+		log.Printf("[AliyunASR] 上下文取消，放弃发音频: task_id=%s", s.taskID)
+		return
+	case <-s.stopSendCh:
+		log.Printf("[AliyunASR] 会话已停止，放弃发音频: task_id=%s", s.taskID)
+		return
+	case <-s.readyCh:
+		log.Printf("[AliyunASR] 收到 TranscriptionStarted，开始发送音频: task_id=%s", s.taskID)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Printf("[AliyunASR] 上下文取消，停止发音频: task_id=%s", s.taskID)
+			return
+		case <-s.stopSendCh:
+			log.Printf("[AliyunASR] 收到停止信号，停止发音频: task_id=%s", s.taskID)
 			return
 		case audio, ok := <-s.audioStream:
 			if !ok {
@@ -297,6 +319,7 @@ func (s *transcribeSession) receiveMessages(done chan struct{}) {
 	for {
 		_, message, err := s.conn.ReadMessage()
 		if err != nil {
+			s.signalStopSend()
 			return
 		}
 
@@ -308,6 +331,9 @@ func (s *transcribeSession) receiveMessages(done chan struct{}) {
 		log.Printf("[AliyunASR] 收到事件: task_id=%s name=%s status=%d status_text=%s result_len=%d", s.taskID, resp.Header.Name, resp.Header.Status, resp.Header.StatusText, len(resp.Payload.Result))
 
 		switch resp.Header.Name {
+		case "TranscriptionStarted":
+			s.signalReady()
+
 		case eventSentenceBegin:
 			// 句子开始，不需要处理
 
@@ -329,14 +355,28 @@ func (s *transcribeSession) receiveMessages(done chan struct{}) {
 
 		case eventCompleted:
 			// 识别完成
+			s.signalStopSend()
 			return
 
 		case eventFailed:
 			// 识别失败
 			log.Printf("[AliyunASR] 识别失败: task_id=%s status=%d status_text=%s", s.taskID, resp.Header.Status, resp.Header.StatusText)
+			s.signalStopSend()
 			return
 		}
 	}
+}
+
+func (s *transcribeSession) signalReady() {
+	s.readyOnce.Do(func() {
+		close(s.readyCh)
+	})
+}
+
+func (s *transcribeSession) signalStopSend() {
+	s.stopOnce.Do(func() {
+		close(s.stopSendCh)
+	})
 }
 
 // response 响应结构
