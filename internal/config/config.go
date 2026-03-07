@@ -62,17 +62,17 @@ func Load() (*Config, error) {
 
 		AdminAPIKey: getEnv("ADMIN_API_KEY", ""),
 
-		LLMProviderDefault: getEnv("LLM_PROVIDER_DEFAULT", "gemini"),
+		LLMProviderDefault: "gemini",
 
 		GeminiAPIKey:    getEnv("GEMINI_API_KEY", ""),
-		GeminiModel:     getEnv("GEMINI_MODEL", "gemini-3.1-flash-image-preview"),
-		GeminiModelFast: getEnv("GEMINI_MODEL_FAST", "gemini-2.0-flash-lite"),
+		GeminiModel:     "gemini-3.1-flash-image-preview",
+		GeminiModelFast: "gemini-2.0-flash-lite",
 		GeminiProxy:     getEnv("GEMINI_PROXY", ""),
 
 		DashScopeAPIKey:    getEnv("DASHSCOPE_API_KEY", ""),
 		DashScopeBaseURL:   getEnv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-		DashScopeModel:     getEnv("DASHSCOPE_MODEL", "qwen3.5-plus"),
-		DashScopeModelFast: getEnv("DASHSCOPE_MODEL_FAST", "qwen-turbo"),
+		DashScopeModel:     "qwen3.5-plus",
+		DashScopeModelFast: "qwen-turbo",
 
 		AliyunAccessKeyID:     getEnv("ALIYUN_ACCESS_KEY_ID", ""),
 		AliyunAccessKeySecret: getEnv("ALIYUN_ACCESS_KEY_SECRET", ""),
