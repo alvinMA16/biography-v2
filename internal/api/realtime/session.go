@@ -143,7 +143,7 @@ func (s *Session) Run() error {
 
 func (s *Session) ensureASRStream() error {
 	if s.asrProvider == nil {
-		return fmt.Errorf("ASR provider not available")
+		return fmt.Errorf("ASR provider not available: set ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET / ALIYUN_ASR_APP_KEY")
 	}
 
 	s.asrMu.Lock()

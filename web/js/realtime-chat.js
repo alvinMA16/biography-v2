@@ -18,6 +18,9 @@ let audioContext = null;
 let mediaStream = null;
 let audioWorklet = null;
 let scriptProcessor = null;
+let inputSource = null;
+let inputSinkGain = null;
+let audioWorkletModuleURL = null;
 
 // 音频播放相关
 let playbackContext = null;
@@ -41,6 +44,7 @@ const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
 const SAMPLE_RATE_OUTPUT = 16000; // 输出采样率（实时 TTS 默认值）
 const CHUNK_SIZE = 3200;          // 每次发送的音频块大小
 const VAD_SILENCE_MS = 650;       // 语音结束静音阈值（越小响应越快，但误触发风险更高）
+const AUDIO_WORKLET_PROCESSOR_NAME = 'pcm-capture-processor';
 
 // 页面加载
 window.onload = async function() {
@@ -257,6 +261,10 @@ function handleServerMessage(message) {
             break;
 
         case 'error':
+            if (typeof message.error === 'string' && message.error.includes('ASR provider not available')) {
+                showError('ASR 未配置，请在服务端设置 ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET / ALIYUN_ASR_APP_KEY');
+                break;
+            }
             showError(message.error || '对话异常');
             break;
 
@@ -373,32 +381,41 @@ async function startRecording() {
         }
 
         audioContext = new AudioContext({ sampleRate: SAMPLE_RATE_INPUT });
-        const source = audioContext.createMediaStreamSource(mediaStream);
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
 
-        // 使用 ScriptProcessor 获取音频数据
-        scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-        scriptProcessor.onaudioprocess = (e) => {
-            if (!isRecording || !isConnected) return;
+        inputSource = audioContext.createMediaStreamSource(mediaStream);
+        inputSinkGain = audioContext.createGain();
+        inputSinkGain.gain.value = 0;
 
-            const inputData = e.inputBuffer.getChannelData(0);
-            let energy = 0;
-            for (let i = 0; i < inputData.length; i++) {
-                energy += inputData[i] * inputData[i];
-            }
-            const rms = Math.sqrt(energy / inputData.length);
-            if (rms > 0.015) {
-                lastVoiceDetectedAt = Date.now();
-                sentVoiceSinceLastStop = true;
-            }
+        // 优先使用 AudioWorklet，避免 ScriptProcessorNode 弃用警告
+        if (audioContext.audioWorklet) {
+            await audioContext.audioWorklet.addModule(getAudioWorkletModuleURL());
+            audioWorklet = new AudioWorkletNode(audioContext, AUDIO_WORKLET_PROCESSOR_NAME, {
+                numberOfInputs: 1,
+                numberOfOutputs: 1,
+                channelCount: 1
+            });
+            audioWorklet.port.onmessage = (event) => {
+                if (!event.data) return;
+                handleInputChunk(event.data);
+            };
 
-            // 转换为 16bit PCM
-            const pcmData = float32ToPCM16(inputData);
-            // 发送到服务器
-            sendAudio(pcmData);
-        };
+            inputSource.connect(audioWorklet);
+            audioWorklet.connect(inputSinkGain);
+            inputSinkGain.connect(audioContext.destination);
+        } else {
+            DEBUG_MODE && console.warn('AudioWorklet 不可用，回退 ScriptProcessor');
+            scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+            scriptProcessor.onaudioprocess = (e) => {
+                handleInputChunk(e.inputBuffer.getChannelData(0));
+            };
 
-        source.connect(scriptProcessor);
-        scriptProcessor.connect(audioContext.destination);
+            inputSource.connect(scriptProcessor);
+            scriptProcessor.connect(inputSinkGain);
+            inputSinkGain.connect(audioContext.destination);
+        }
 
         isRecording = true;
         updateVoiceStatus('请开始说话');
@@ -432,9 +449,25 @@ async function startRecording() {
 function stopRecording() {
     isRecording = false;
 
+    if (audioWorklet) {
+        audioWorklet.port.onmessage = null;
+        audioWorklet.disconnect();
+        audioWorklet = null;
+    }
+
     if (scriptProcessor) {
         scriptProcessor.disconnect();
         scriptProcessor = null;
+    }
+
+    if (inputSource) {
+        inputSource.disconnect();
+        inputSource = null;
+    }
+
+    if (inputSinkGain) {
+        inputSinkGain.disconnect();
+        inputSinkGain = null;
     }
 
     if (audioContext) {
@@ -461,6 +494,48 @@ function sendAudio(pcmData) {
         type: 'audio',
         data: base64Data
     }));
+}
+
+function handleInputChunk(inputData) {
+    if (!isRecording || !isConnected || !inputData) return;
+
+    let energy = 0;
+    for (let i = 0; i < inputData.length; i++) {
+        energy += inputData[i] * inputData[i];
+    }
+    const rms = Math.sqrt(energy / inputData.length);
+    if (rms > 0.015) {
+        lastVoiceDetectedAt = Date.now();
+        sentVoiceSinceLastStop = true;
+    }
+
+    // 转换为 16bit PCM
+    const pcmData = float32ToPCM16(inputData);
+    // 发送到服务器
+    sendAudio(pcmData);
+}
+
+function getAudioWorkletModuleURL() {
+    if (audioWorkletModuleURL) {
+        return audioWorkletModuleURL;
+    }
+
+    const processorCode = `
+class PCMCaptureProcessor extends AudioWorkletProcessor {
+    process(inputs) {
+        const input = inputs[0];
+        if (input && input[0]) {
+            this.port.postMessage(input[0]);
+        }
+        return true;
+    }
+}
+registerProcessor('${AUDIO_WORKLET_PROCESSOR_NAME}', PCMCaptureProcessor);
+    `;
+
+    const blob = new Blob([processorCode], { type: 'application/javascript' });
+    audioWorkletModuleURL = URL.createObjectURL(blob);
+    return audioWorkletModuleURL;
 }
 
 // ========== 音频播放 ==========

@@ -206,7 +206,7 @@ func initLLMProviders(cfg *config.Config) *llm.Manager {
 // initASRProvider 初始化 ASR 提供者
 func initASRProvider(cfg *config.Config) asr.Provider {
 	if cfg.AliyunAccessKeyID == "" || cfg.AliyunAccessKeySecret == "" || cfg.AliyunASRAppKey == "" {
-		log.Println("Warning: Aliyun ASR not configured")
+		log.Println("Warning: Aliyun ASR not configured (require ALIYUN_ACCESS_KEY_ID, ALIYUN_ACCESS_KEY_SECRET, ALIYUN_ASR_APP_KEY)")
 		return nil
 	}
 
