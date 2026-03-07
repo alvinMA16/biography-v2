@@ -37,7 +37,7 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 
 	model := cfg.Model
 	if model == "" {
-		model = "qwen-plus"
+		model = "qwen3.5-plus"
 	}
 
 	modelFast := cfg.ModelFast

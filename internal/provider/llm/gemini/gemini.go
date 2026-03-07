@@ -20,6 +20,7 @@ import (
 // Provider Gemini LLM 提供者
 type Provider struct {
 	client    *genai.Client
+	rawClient *http.Client
 	apiKey    string
 	model     string
 	modelFast string
@@ -63,7 +64,7 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 
 	model := cfg.Model
 	if model == "" {
-		model = "gemini-2.5-flash"
+		model = "gemini-3.1-flash-image-preview"
 	}
 
 	modelFast := cfg.ModelFast
@@ -71,8 +72,24 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 		modelFast = "gemini-2.0-flash-lite"
 	}
 
+	// 创建共享 HTTP 客户端（用于 RawGenerate 等直接 HTTP 调用）
+	rawTransport := &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	if cfg.Proxy != "" {
+		proxyURL, _ := url.Parse(cfg.Proxy) // 前面已校验过
+		rawTransport.Proxy = http.ProxyURL(proxyURL)
+	}
+	rawClient := &http.Client{
+		Transport: rawTransport,
+		Timeout:   30 * time.Second,
+	}
+
 	return &Provider{
 		client:    client,
+		rawClient: rawClient,
 		apiKey:    cfg.APIKey,
 		model:     model,
 		modelFast: modelFast,
@@ -127,16 +144,7 @@ func (p *Provider) RawGenerate(ctx context.Context, prompt string) (string, stri
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	if p.proxy != "" {
-		proxyURL, err := url.Parse(p.proxy)
-		if err != nil {
-			return string(jsonBody), "", 0, fmt.Errorf("gemini: invalid proxy URL: %w", err)
-		}
-		client.Transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
-	}
-
-	resp, err := client.Do(req)
+	resp, err := p.rawClient.Do(req)
 	if err != nil {
 		return string(jsonBody), "", 0, fmt.Errorf("gemini: request failed: %w", err)
 	}
