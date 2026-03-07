@@ -901,6 +901,9 @@ type APIItem struct {
 	UpstreamEndpoint string `json:"upstream_endpoint,omitempty"`
 	LatencyMS        int64  `json:"latency_ms"`
 	Error            string `json:"error,omitempty"`
+	RawRequestBody   string `json:"raw_request_body,omitempty"`
+	RawResponseBody  string `json:"raw_response_body,omitempty"`
+	RawStatusCode    int    `json:"raw_status_code,omitempty"`
 }
 
 type upstreamEndpointProvider interface {
@@ -1080,8 +1083,11 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 				start := time.Now()
 				rawProvider, ok := provider.(rawLLMRequestProvider)
 				if ok {
-					_, _, statusCode, probeErr := rawProvider.RawGenerate(testCtx, "hello")
+					rawReq, rawResp, statusCode, probeErr := rawProvider.RawGenerate(testCtx, "hello")
 					item.LatencyMS = time.Since(start).Milliseconds()
+					item.RawRequestBody = rawReq
+					item.RawResponseBody = rawResp
+					item.RawStatusCode = statusCode
 					if probeErr != nil {
 						item.Status = "error"
 						item.Error = probeErr.Error()
@@ -1095,6 +1101,9 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 					// 兜底：如果 provider 没有 raw 方法，至少走一次普通 chat。
 					_, probeErr := provider.Chat(testCtx, []llm.Message{{Role: "user", Content: "hello"}})
 					item.LatencyMS = time.Since(start).Milliseconds()
+					item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","prompt":"hello"}`, target.Name)
+					item.RawResponseBody = ""
+					item.RawStatusCode = http.StatusOK
 					if probeErr != nil {
 						item.Status = "error"
 						item.Error = probeErr.Error()
@@ -1128,6 +1137,11 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 		start := time.Now()
 		probeErr := h.asrProvider.HealthCheck(testCtx)
 		item.LatencyMS = time.Since(start).Milliseconds()
+		item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","check":"HealthCheck"}`, h.asrProvider.Name())
+		if probeErr == nil {
+			item.RawResponseBody = `{"message":"health check passed"}`
+			item.RawStatusCode = http.StatusOK
+		}
 		cancel()
 		if probeErr != nil {
 			item.Status = "error"
@@ -1169,6 +1183,11 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			SampleRate: 24000,
 		})
 		item.LatencyMS = time.Since(start).Milliseconds()
+		item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","text":"你好","format":"mp3","sample_rate":24000}`, h.ttsProvider.Name())
+		if probeErr == nil {
+			item.RawResponseBody = `{"message":"tts synthesize success"}`
+			item.RawStatusCode = http.StatusOK
+		}
 		cancel()
 		if probeErr != nil {
 			item.Status = "error"

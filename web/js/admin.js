@@ -876,6 +876,18 @@ async function loadApiMonitor() {
     try {
         const data = await adminRequest('/admin/apis');
         apiMonitorItems = data.apis || [];
+        apiMonitorTraces = {};
+        apiMonitorItems.forEach((item) => {
+            if (item.raw_request_body || item.raw_response_body || item.raw_status_code) {
+                apiMonitorTraces[item.id] = {
+                    request_body: item.raw_request_body || {},
+                    response_body: item.raw_response_body || {},
+                    raw_status_code: item.raw_status_code,
+                    tested_at: new Date().toISOString(),
+                    status: item.status || '-',
+                };
+            }
+        });
         apiMonitorLoaded = true;
         renderApiMonitorTable(apiMonitorItems);
     } catch (e) {
