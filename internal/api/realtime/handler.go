@@ -191,7 +191,7 @@ func (h *Handler) HandlePreview(c *gin.Context) {
 	audio, err := h.ttsProvider.Synthesize(c.Request.Context(), text, tts.SynthesisConfig{
 		Voice:      speaker,
 		SampleRate: 24000,
-		Format:     "pcm",
+		Format:     "mp3",
 	})
 	if err != nil {
 		log.Printf("[Realtime] preview TTS failed: %v", err)

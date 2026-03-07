@@ -48,8 +48,8 @@ services:
 
       # TTS (豆包)
       DOUBAO_APP_ID: ${DOUBAO_APP_ID:-}
-      DOUBAO_TOKEN: ${DOUBAO_TOKEN:-}
-      DOUBAO_CLUSTER: ${DOUBAO_CLUSTER:-volcano_mega}
+      DOUBAO_ACCESS_KEY: ${DOUBAO_ACCESS_KEY:-}
+      DOUBAO_RESOURCE_ID: ${DOUBAO_RESOURCE_ID:-volc.megatts.default}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

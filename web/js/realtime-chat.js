@@ -112,8 +112,8 @@ async function requestMicrophoneEarly() {
 
 // 记录师信息 (使用豆包播客 TTS 支持的音色)
 const RECORDER_INFO = {
-    female: { name: '小安', speaker: 'zh_female_mizaitongxue_v2_saturn_bigtts' },
-    male: { name: '小川', speaker: 'zh_male_dayixiansheng_v2_saturn_bigtts' }
+    female: { name: '小安', speaker: 'zh_female_mizai_saturn_bigtts' },
+    male: { name: '小川', speaker: 'zh_male_dayi_saturn_bigtts' }
 };
 
 async function connectWebSocket() {

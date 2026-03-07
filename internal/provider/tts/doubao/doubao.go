@@ -23,7 +23,7 @@ const (
 	defaultTimeout = 30 * time.Second
 
 	// 默认资源 ID
-	defaultResourceID = "seed-tts-1.0"
+	defaultResourceID = "seed-tts-2.0"
 )
 
 // Provider 豆包 TTS 提供者
@@ -49,8 +49,8 @@ func New(cfg tts.ProviderConfig) (*Provider, error) {
 	speakers := cfg.Speakers
 	if len(speakers) == 0 {
 		speakers = []string{
-			"zh_male_dayixiansheng_v2_saturn_bigtts",
-			"zh_female_mizaitongxue_v2_saturn_bigtts",
+			"zh_male_dayi_saturn_bigtts",
+			"zh_female_mizai_saturn_bigtts",
 		}
 	}
 
@@ -323,28 +323,28 @@ func (p *Provider) SynthesizeStream(ctx context.Context, text string, config tts
 func (p *Provider) ListVoices(ctx context.Context) ([]tts.Voice, error) {
 	voices := []tts.Voice{
 		{
-			ID:          "zh_male_dayixiansheng_v2_saturn_bigtts",
-			Name:        "大义先生",
+			ID:          "zh_male_dayi_saturn_bigtts",
+			Name:        "大壹",
 			Gender:      "male",
-			Description: "黑猫侦探社系列男声",
+			Description: "视频配音男声",
 		},
 		{
-			ID:          "zh_female_mizaitongxue_v2_saturn_bigtts",
-			Name:        "咪仔同学",
+			ID:          "zh_female_mizai_saturn_bigtts",
+			Name:        "黑猫侦探社咪仔",
 			Gender:      "female",
-			Description: "黑猫侦探社系列女声",
+			Description: "视频配音女声",
 		},
 		{
-			ID:          "zh_male_liufei_v2_saturn_bigtts",
-			Name:        "刘飞",
+			ID:          "zh_male_liufei_uranus_bigtts",
+			Name:        "刘飞 2.0",
 			Gender:      "male",
-			Description: "刘飞和潇磊系列男声",
+			Description: "通用场景男声",
 		},
 		{
-			ID:          "zh_male_xiaolei_v2_saturn_bigtts",
-			Name:        "潇磊",
-			Gender:      "male",
-			Description: "刘飞和潇磊系列男声",
+			ID:          "zh_female_shuangkuaisisi_moon_bigtts",
+			Name:        "爽快思思",
+			Gender:      "female",
+			Description: "通用场景女声",
 		},
 	}
 

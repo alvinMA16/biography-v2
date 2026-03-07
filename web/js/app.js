@@ -391,12 +391,12 @@ async function submitChangePassword() {
 const RECORDERS = {
     female: {
         name: '忆安',
-        speaker: 'zh_female_mizaitongxue_v2_saturn_bigtts',
+        speaker: 'zh_female_mizai_saturn_bigtts',
         greeting: '您好，我是小安。很高兴能成为您的人生记录师，期待听您讲述那些珍贵的回忆。'
     },
     male: {
         name: '言川',
-        speaker: 'zh_male_dayixiansheng_v2_saturn_bigtts',
+        speaker: 'zh_male_dayi_saturn_bigtts',
         greeting: '您好，我是小川。能够记录您的人生故事，是我的荣幸。请慢慢讲，我都在听。'
     }
 };
@@ -427,9 +427,7 @@ function updateRecorderSelection(gender) {
 }
 
 // 选择记录师
-let previewAudioContext = null;
-let previewAudioQueue = [];
-let previewNextPlayTime = 0;
+let previewAudio = null;
 let pendingRecorder = null;  // 待确认的选择
 
 async function selectRecorder(gender) {
@@ -481,75 +479,33 @@ async function playRecorderGreeting(gender) {
     const url = `/api/realtime/preview?speaker=${encodeURIComponent(recorder.speaker)}&text=${encodeURIComponent(recorder.greeting)}`;
 
     try {
-        previewAudioContext = new AudioContext({ sampleRate: 24000 });
-        // 确保 AudioContext 处于运行状态（现代浏览器自动播放策略要求）
-        if (previewAudioContext.state === 'suspended') {
-            await previewAudioContext.resume();
-        }
-
         const resp = await fetch(url);
         if (!resp.ok) {
             console.error('预览音频失败:', resp.status);
             return;
         }
         const data = await resp.json();
-        const audioData = base64ToArrayBuffer(data.audio);
-        playPreviewAudio(audioData);
+        if (!data.audio) {
+            console.error('预览音频数据为空');
+            return;
+        }
+
+        // 将 base64 音频转为 data URL 播放
+        const audioSrc = 'data:audio/mp3;base64,' + data.audio;
+        previewAudio = new Audio(audioSrc);
+        previewAudio.play().catch(err => console.error('播放失败:', err));
 
     } catch (error) {
         console.error('播放开场白失败:', error);
     }
 }
 
-function playPreviewAudio(audioData) {
-    if (!previewAudioContext) return;
-
-    const floatData = pcm16LEToFloat32Preview(audioData);
-    if (floatData.length === 0) return;
-
-    const audioBuffer = previewAudioContext.createBuffer(1, floatData.length, 24000);
-    audioBuffer.getChannelData(0).set(floatData);
-
-    const source = previewAudioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(previewAudioContext.destination);
-
-    const currentTime = previewAudioContext.currentTime;
-    if (previewNextPlayTime < currentTime) {
-        previewNextPlayTime = currentTime + 0.01;
-    }
-
-    source.start(previewNextPlayTime);
-    previewNextPlayTime += audioBuffer.duration;
-}
-
-function pcm16LEToFloat32Preview(arrayBuffer) {
-    const dataView = new DataView(arrayBuffer);
-    const numSamples = arrayBuffer.byteLength / 2;
-    const float32 = new Float32Array(numSamples);
-    for (let i = 0; i < numSamples; i++) {
-        const int16 = dataView.getInt16(i * 2, true);
-        float32[i] = int16 / 32768.0;
-    }
-    return float32;
-}
-
-function base64ToArrayBuffer(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes.buffer;
-}
-
 function stopPreviewAudio() {
-    if (previewAudioContext) {
-        previewAudioContext.close();
-        previewAudioContext = null;
+    if (previewAudio) {
+        previewAudio.pause();
+        previewAudio.src = '';
+        previewAudio = null;
     }
-    previewAudioQueue = [];
-    previewNextPlayTime = 0;
 }
 
 // ========== 时代记忆 ==========
