@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -97,6 +98,11 @@ func buildTransport(proxy string) (*http.Transport, error) {
 			return nil, fmt.Errorf("gemini: invalid proxy URL: %w", err)
 		}
 		trans.Proxy = http.ProxyURL(proxyURL)
+		// HTTP/2 通过 HTTP 代理（CONNECT 隧道）不稳定，容易导致连接无法归还连接池，
+		// 累积后触发 "Too many open connections"。走代理时退回 HTTP/1.1 并缩短空闲超时。
+		trans.ForceAttemptHTTP2 = false
+		trans.IdleConnTimeout = 30 * time.Second
+		log.Printf("[Gemini] 检测到代理 %s，已禁用 HTTP/2 并缩短空闲超时", proxy)
 	}
 	return trans, nil
 }

@@ -21,6 +21,10 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -63,6 +67,13 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+          gateway: 172.18.0.1
 
 volumes:
   pgdata:
