@@ -172,6 +172,17 @@ func (s *Session) ensureASRStream() error {
 
 	go func() {
 		log.Printf("[Session] ASR 结果协程启动")
+		defer func(ch chan []byte) {
+			// ASR 结果流结束后，回收当前音频流句柄，允许后续自动重建。
+			s.asrMu.Lock()
+			if s.asrAudioChan == ch {
+				log.Printf("[Session] ASR 结果流已结束，回收 ASR 音频流")
+				close(s.asrAudioChan)
+				s.asrAudioChan = nil
+			}
+			s.asrMu.Unlock()
+		}(audioChan)
+
 		for result := range resultChan {
 			// 发送 ASR 结果给前端（中间+最终）
 			s.sendASR(result.Text, result.IsFinal)
@@ -304,6 +315,9 @@ func (s *Session) finishUserTurn() error {
 	s.currentUserText.Reset()
 	s.currentASRText = ""
 	s.asrTextMu.Unlock()
+
+	// 每轮 stop 后主动结束当前 ASR 会话，避免上游 idle timeout 影响下一轮。
+	s.closeASRStream()
 
 	if userText == "" {
 		log.Printf("[Session] stop 收到但未识别到文本，结束本轮并继续监听")

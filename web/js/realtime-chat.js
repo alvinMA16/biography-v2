@@ -42,18 +42,20 @@ let awaitingResponse = false; // 已发送 stop，等待 AI 回复
 let userSpeechActive = false; // 当前是否检测到用户正在说话
 let voiceBars = [];
 let pendingPcmBytes = new Uint8Array(0);
+let preSpeechPcmBytes = new Uint8Array(0);
 
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
 const SAMPLE_RATE_OUTPUT = 16000; // 输出采样率（实时 TTS 默认值）
 const CHUNK_SIZE = 3200;          // 每次发送的音频块大小
-const VAD_SILENCE_MS = 650;       // 语音结束静音阈值（越小响应越快，但误触发风险更高）
+const VAD_SILENCE_MS = 1200;      // 语音结束静音阈值（适当放大，减少截断）
 const AUDIO_WORKLET_PROCESSOR_NAME = 'pcm-capture-processor';
-const SPEECH_START_RMS = 0.007;   // 超过该阈值判定为开始说话
-const SPEECH_END_RMS = 0.0045;    // 低于该阈值并持续静音判定为结束
+const SPEECH_START_RMS = 0.006;   // 超过该阈值判定为开始说话
+const SPEECH_END_RMS = 0.0035;    // 低于该阈值并持续静音判定为结束
 const VISUAL_NOISE_FLOOR = 0.0035;
 const VISUAL_BASE_HEIGHTS = [6, 8, 10, 8, 6];
 const VISUAL_GAIN = 30;
+const PRE_SPEECH_BUFFER_BYTES = 16000 * 2 * 0.35; // 约 350ms 预录缓冲
 
 // 页面加载
 window.onload = async function() {
@@ -481,6 +483,7 @@ function stopRecording() {
     userSpeechActive = false;
     sentVoiceSinceLastStop = false;
     pendingPcmBytes = new Uint8Array(0);
+    preSpeechPcmBytes = new Uint8Array(0);
     setVoiceActive(false);
 
     if (audioWorklet) {
@@ -565,6 +568,7 @@ function handleInputChunk(inputData) {
     if (isAISpeaking || awaitingResponse) {
         userSpeechActive = false;
         pendingPcmBytes = new Uint8Array(0);
+        preSpeechPcmBytes = new Uint8Array(0);
         setVoiceLevel(0);
         return;
     }
@@ -575,33 +579,52 @@ function handleInputChunk(inputData) {
     }
     const rms = Math.sqrt(energy / inputData.length);
     setVoiceLevel(rms);
+    const pcmData = float32ToPCM16(inputData);
+
+    if (!userSpeechActive) {
+        preSpeechPcmBytes = appendLimitedBytes(preSpeechPcmBytes, new Uint8Array(pcmData.buffer), PRE_SPEECH_BUFFER_BYTES);
+    }
+
     if (rms >= SPEECH_START_RMS) {
         if (!userSpeechActive) {
             userSpeechActive = true;
             updateVoiceStatus('正在聆听...');
             setVoiceActive(true);
+            // 首次触发说话时，把阈值之前的短暂语音一并补发，减少起句丢字
+            if (preSpeechPcmBytes.length > 0) {
+                queuePCMBytesForSend(preSpeechPcmBytes);
+                preSpeechPcmBytes = new Uint8Array(0);
+            }
         }
         lastVoiceDetectedAt = Date.now();
         sentVoiceSinceLastStop = true;
-    } else if (userSpeechActive && rms < SPEECH_END_RMS) {
-        if (Date.now() - lastVoiceDetectedAt >= VAD_SILENCE_MS) {
-            userSpeechActive = false;
-            setVoiceActive(false);
-            if (!awaitingResponse && !isAISpeaking) {
-                updateVoiceStatus('请开始说话');
-            }
-        }
     }
 
-    // 只在检测到真实人声时发送音频，降低噪音与误触发
+    // 未触发起说阈值前不发送（仅缓存预录）
     if (!userSpeechActive) {
         return;
     }
 
-    // 转换为 16bit PCM
-    const pcmData = float32ToPCM16(inputData);
-    // 聚合成较稳定的包（3200 bytes）后发送到服务器
+    // 一旦进入说话态，持续发送直到 VAD 触发 stop，避免尾音/弱音被截断
     queuePCMForSend(pcmData);
+}
+
+function appendLimitedBytes(existing, incoming, maxBytes) {
+    const merged = new Uint8Array(existing.length + incoming.length);
+    merged.set(existing, 0);
+    merged.set(incoming, existing.length);
+    if (merged.length <= maxBytes) {
+        return merged;
+    }
+    return merged.slice(merged.length - maxBytes);
+}
+
+function queuePCMBytesForSend(bytes) {
+    const merged = new Uint8Array(pendingPcmBytes.length + bytes.length);
+    merged.set(pendingPcmBytes, 0);
+    merged.set(bytes, pendingPcmBytes.length);
+    pendingPcmBytes = merged;
+    flushPendingPCM(false);
 }
 
 function getAudioWorkletModuleURL() {
