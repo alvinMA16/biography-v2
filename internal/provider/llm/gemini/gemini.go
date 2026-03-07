@@ -1,9 +1,12 @@
 package gemini
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -17,6 +20,7 @@ import (
 // Provider Gemini LLM 提供者
 type Provider struct {
 	client    *genai.Client
+	apiKey    string
 	model     string
 	modelFast string
 	proxy     string
@@ -69,6 +73,7 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 
 	return &Provider{
 		client:    client,
+		apiKey:    cfg.APIKey,
 		model:     model,
 		modelFast: modelFast,
 		proxy:     cfg.Proxy,
@@ -91,6 +96,58 @@ func (p *Provider) UpstreamEndpoint() string {
 		return p.proxy
 	}
 	return "https://generativelanguage.googleapis.com"
+}
+
+// RawGenerate 执行一次原始请求，返回原始请求体、原始响应体和状态码（用于监控诊断）。
+func (p *Provider) RawGenerate(ctx context.Context, prompt string) (string, string, int, error) {
+	requestObj := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"role": "user",
+				"parts": []map[string]string{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature": 0.7,
+			"topP":        0.9,
+		},
+	}
+
+	jsonBody, err := json.Marshal(requestObj)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("gemini: failed to marshal request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", p.model, url.QueryEscape(p.apiKey))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return string(jsonBody), "", 0, fmt.Errorf("gemini: failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	if p.proxy != "" {
+		proxyURL, err := url.Parse(p.proxy)
+		if err != nil {
+			return string(jsonBody), "", 0, fmt.Errorf("gemini: invalid proxy URL: %w", err)
+		}
+		client.Transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return string(jsonBody), "", 0, fmt.Errorf("gemini: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	rawResp, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return string(jsonBody), string(rawResp), resp.StatusCode, fmt.Errorf("gemini: API error (status %d): %s", resp.StatusCode, string(rawResp))
+	}
+
+	return string(jsonBody), string(rawResp), resp.StatusCode, nil
 }
 
 // Chat 同步对话

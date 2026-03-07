@@ -911,6 +911,10 @@ type modelNameProvider interface {
 	ModelName() string
 }
 
+type rawLLMRequestProvider interface {
+	RawGenerate(ctx context.Context, prompt string) (string, string, int, error)
+}
+
 // HealthCheckResponse 健康检查响应
 type HealthCheckResponse struct {
 	Status    string                    `json:"status"` // healthy, degraded, unhealthy
@@ -1180,44 +1184,60 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		if promptText == "" {
 			promptText = "请仅回复：ok"
 		}
-		requestBody := gin.H{
-			"provider": providerName,
-			"prompt":   promptText,
-		}
-
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
 
+		provider, err := h.llmManager.Get(providerName)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"id":     apiID,
+				"status": "error",
+				"error":  err.Error(),
+			})
+			return
+		}
+
 		start := time.Now()
-		resp, err := h.llmManager.ChatWith(ctx, providerName, []llm.Message{
-			{Role: "user", Content: promptText},
-		})
+		rawReq := ""
+		rawResp := ""
+		rawStatus := 0
+
+		if rawProvider, ok := provider.(rawLLMRequestProvider); ok {
+			rawReq, rawResp, rawStatus, err = rawProvider.RawGenerate(ctx, promptText)
+		} else {
+			chatResp, chatErr := provider.Chat(ctx, []llm.Message{{Role: "user", Content: promptText}})
+			if chatErr != nil {
+				err = chatErr
+			} else {
+				rawReq = fmt.Sprintf(`{"provider":"%s","prompt":%q}`, providerName, promptText)
+				rawResp = chatResp.Content
+				rawStatus = http.StatusOK
+			}
+		}
 		latency := time.Since(start).Milliseconds()
 		if err != nil {
 			errType, errHint := classifyProviderError(err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"id":           apiID,
-				"status":       "error",
-				"error":        err.Error(),
-				"error_type":   errType,
-				"error_hint":   errHint,
-				"latency_ms":   latency,
-				"request_body": requestBody,
+				"id":                apiID,
+				"status":            "error",
+				"error":             err.Error(),
+				"error_type":        errType,
+				"error_hint":        errHint,
+				"latency_ms":        latency,
+				"raw_request_body":  rawReq,
+				"raw_response_body": rawResp,
+				"raw_status_code":   rawStatus,
 			})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"id":           apiID,
-			"status":       "ok",
-			"provider":     providerName,
-			"latency_ms":   latency,
-			"preview_text": resp.Content,
-			"request_body": requestBody,
-			"response_body": gin.H{
-				"content":       resp.Content,
-				"finish_reason": resp.FinishReason,
-				"tokens_used":   resp.TokensUsed,
-			},
+			"id":                apiID,
+			"status":            "ok",
+			"provider":          providerName,
+			"latency_ms":        latency,
+			"raw_request_body":  rawReq,
+			"raw_response_body": rawResp,
+			"raw_status_code":   rawStatus,
 		})
 		return
 

@@ -904,7 +904,15 @@ function renderApiMonitorRow(item) {
     const statusClass = currentStatus === 'ok' ? 'badge-yes' : 'badge-no';
     const latencyValue = latest?.latency_ms ?? item.latency_ms;
     const latencyText = (latencyValue !== undefined && latencyValue !== null) ? `${latencyValue} ms` : '-';
-    const providerText = item.is_primary ? `${item.provider} (主用)` : (item.provider || '-');
+    const providerName = String(item.provider || '-').toLowerCase();
+    const providerLabelMap = {
+        dashscope: '千问(DashScope)',
+        gemini: 'Gemini',
+        aliyun: '阿里云',
+        doubao: '豆包',
+    };
+    const providerLabel = providerLabelMap[providerName] || (item.provider || '-');
+    const providerText = item.is_primary ? `${providerLabel} (主用)` : providerLabel;
 
     let resultText = latest?.error || item.error || '-';
     if (latest?.error_hint) {
@@ -982,8 +990,9 @@ async function testAPI(apiId, btnEl) {
             body: JSON.stringify(body),
         });
         apiMonitorTraces[apiId] = {
-            request_body: result.request_body || body,
-            response_body: result.response_body || result,
+            request_body: result.raw_request_body || result.request_body || body,
+            response_body: result.raw_response_body || result.response_body || result,
+            raw_status_code: result.raw_status_code,
             tested_at: new Date().toISOString(),
             status: 'ok',
         };
@@ -1023,8 +1032,9 @@ async function testAPI(apiId, btnEl) {
             target.error = e.message || '测试失败';
         }
         apiMonitorTraces[apiId] = {
-            request_body: e.data?.request_body || {},
-            response_body: e.data || { error: e.message || '测试失败' },
+            request_body: e.data?.raw_request_body || e.data?.request_body || {},
+            response_body: e.data?.raw_response_body || e.data || { error: e.message || '测试失败' },
+            raw_status_code: e.data?.raw_status_code,
             tested_at: new Date().toISOString(),
             status: 'error',
         };
@@ -1051,7 +1061,8 @@ function showAPITrace(apiId) {
     const resp = document.getElementById('apiTraceResponse');
 
     title.textContent = `API 测试详情 - ${apiId}`;
-    meta.textContent = `状态: ${trace.status || '-'} · 时间: ${new Date(trace.tested_at).toLocaleString('zh-CN')}`;
+    const rawStatus = trace.raw_status_code ? ` · 上游状态码: ${trace.raw_status_code}` : '';
+    meta.textContent = `状态: ${trace.status || '-'}${rawStatus} · 时间: ${new Date(trace.tested_at).toLocaleString('zh-CN')}`;
     req.value = prettyJSON(trace.request_body);
     resp.value = prettyJSON(trace.response_body);
 
@@ -1064,6 +1075,14 @@ function closeApiTraceModal() {
 }
 
 function prettyJSON(value) {
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return JSON.stringify(parsed, null, 2);
+        } catch (_) {
+            return value;
+        }
+    }
     try {
         return JSON.stringify(value, null, 2);
     } catch (_) {

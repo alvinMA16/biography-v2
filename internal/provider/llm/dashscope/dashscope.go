@@ -76,6 +76,42 @@ func (p *Provider) UpstreamEndpoint() string {
 	return p.baseURL + "/chat/completions"
 }
 
+// RawGenerate 执行一次原始请求，返回原始请求体、原始响应体和状态码（用于监控诊断）。
+func (p *Provider) RawGenerate(ctx context.Context, prompt string) (string, string, int, error) {
+	reqBody := chatRequest{
+		Model: p.model,
+		Messages: []chatMessage{
+			{Role: "user", Content: prompt},
+		},
+		Stream: false,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("dashscope: failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return string(jsonBody), "", 0, fmt.Errorf("dashscope: failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return string(jsonBody), "", 0, fmt.Errorf("dashscope: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	rawResp, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return string(jsonBody), string(rawResp), resp.StatusCode, fmt.Errorf("dashscope: API error (status %d): %s", resp.StatusCode, string(rawResp))
+	}
+
+	return string(jsonBody), string(rawResp), resp.StatusCode, nil
+}
+
 // chatRequest OpenAI 兼容的请求格式
 type chatRequest struct {
 	Model    string        `json:"model"`
