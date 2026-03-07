@@ -38,8 +38,9 @@ let vadTimer = null;
 
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
-const SAMPLE_RATE_OUTPUT = 24000; // 输出采样率（豆包TTS输出）
+const SAMPLE_RATE_OUTPUT = 16000; // 输出采样率（实时 TTS 默认值）
 const CHUNK_SIZE = 3200;          // 每次发送的音频块大小
+const VAD_SILENCE_MS = 650;       // 语音结束静音阈值（越小响应越快，但误触发风险更高）
 
 // 页面加载
 window.onload = async function() {
@@ -209,7 +210,7 @@ function handleServerMessage(message) {
         case 'audio':
             // 收到音频数据，加入播放队列
             const audioData = base64ToArrayBuffer(message.data);
-            queueAudio(audioData);
+            queueAudio(audioData, message.sample_rate || SAMPLE_RATE_OUTPUT);
             break;
 
         // 新协议：tts
@@ -217,7 +218,7 @@ function handleServerMessage(message) {
             isAISpeaking = true;
             setVoiceActive(false);
             updateVoiceStatus('记录师正在说话');
-            queueAudio(base64ToArrayBuffer(message.data));
+            queueAudio(base64ToArrayBuffer(message.data), message.sample_rate || SAMPLE_RATE_OUTPUT);
             break;
 
         case 'text':
@@ -409,7 +410,7 @@ async function startRecording() {
             vadTimer = setInterval(() => {
                 if (!isRecording || !isConnected || isAISpeaking) return;
                 if (!sentVoiceSinceLastStop) return;
-                if (Date.now() - lastVoiceDetectedAt < 1200) return;
+                if (Date.now() - lastVoiceDetectedAt < VAD_SILENCE_MS) return;
 
                 // 一次发言结束，通知服务端开始生成回复
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -476,13 +477,16 @@ function initPlayback() {
     DEBUG_MODE && console.log('播放上下文采样率:', playbackContext.sampleRate);
 }
 
-async function queueAudio(audioData) {
+async function queueAudio(audioData, sampleRate) {
     // 确保 AudioContext 处于运行状态
     if (playbackContext.state === 'suspended') {
         await playbackContext.resume();
     }
 
-    audioQueue.push(audioData);
+    audioQueue.push({
+        data: audioData,
+        sampleRate: sampleRate || SAMPLE_RATE_OUTPUT,
+    });
     if (!isPlaying) {
         playNextAudio();
     }
@@ -504,7 +508,9 @@ async function playNextAudio() {
 
     // 批量处理队列中的音频，使用精确的时间调度
     while (audioQueue.length > 0) {
-        const audioData = audioQueue.shift();
+        const item = audioQueue.shift();
+        const audioData = item.data;
+        const sampleRate = item.sampleRate || SAMPLE_RATE_OUTPUT;
 
         try {
             const floatData = pcm16LEToFloat32(audioData);
@@ -516,7 +522,7 @@ async function playNextAudio() {
             // 应用淡入淡出来减少 click 声
             applyFade(floatData);
 
-            const audioBuffer = playbackContext.createBuffer(1, floatData.length, SAMPLE_RATE_OUTPUT);
+            const audioBuffer = playbackContext.createBuffer(1, floatData.length, sampleRate);
             audioBuffer.getChannelData(0).set(floatData);
 
             const source = playbackContext.createBufferSource();

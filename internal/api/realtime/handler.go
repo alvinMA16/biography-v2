@@ -109,6 +109,7 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 		Mode:           mode,
 		TopicID:        topicID,
 		ConversationID: c.Query("conversation_id"),
+		Speaker:        strings.TrimSpace(c.Query("speaker")),
 		UserID:         userID.String(),
 		UserName:       getUserDisplayName(user),
 		BirthYear:      user.BirthYear,

@@ -28,6 +28,15 @@ const (
 	StateSpeaking                      // TTS 播放中
 )
 
+const greetingAudioCacheMaxEntries = 128
+const realtimeTTSSampleRate = 16000
+
+var (
+	greetingAudioCacheMu sync.RWMutex
+	greetingAudioCache   = make(map[string][]byte)
+	greetingAudioOrder   []string
+)
+
 // Session 实时对话会话
 type Session struct {
 	conn   *websocket.Conn
@@ -154,7 +163,7 @@ func (s *Session) init() error {
 		s.sendResponse(greeting)
 
 		// TTS 合成开场白
-		if err := s.synthesizeAndSend(greeting); err != nil {
+		if err := s.synthesizeAndSendGreeting(greeting); err != nil {
 			log.Printf("[Session] TTS 开场白错误: %v", err)
 		}
 	}
@@ -253,7 +262,7 @@ func (s *Session) finishUserTurn() error {
 
 	// TTS 合成
 	s.state = StateSpeaking
-	if err := s.synthesizeAndSend(assistantText); err != nil {
+	if _, err := s.synthesizeAndSend(assistantText); err != nil {
 		log.Printf("[Session] TTS 错误: %v", err)
 	}
 
@@ -312,22 +321,106 @@ func (s *Session) getGreeting() string {
 	return ""
 }
 
-// synthesizeAndSend TTS 合成并发送
-func (s *Session) synthesizeAndSend(text string) error {
-	if s.ttsProvider == nil {
-		return nil // TTS 不可用时静默跳过
+func (s *Session) greetingCacheKey(text string) string {
+	return fmt.Sprintf("%s|%s|%d|%s|%s", s.ttsProvider.Name(), s.config.Speaker, realtimeTTSSampleRate, "pcm", text)
+}
+
+func getGreetingAudioFromCache(key string) ([]byte, bool) {
+	greetingAudioCacheMu.RLock()
+	defer greetingAudioCacheMu.RUnlock()
+
+	audio, ok := greetingAudioCache[key]
+	if !ok {
+		return nil, false
 	}
 
-	audio, err := s.ttsProvider.Synthesize(s.ctx, text, tts.SynthesisConfig{
-		SampleRate: 24000,
+	// 返回副本，避免并发场景下外部修改底层切片。
+	audioCopy := make([]byte, len(audio))
+	copy(audioCopy, audio)
+	return audioCopy, true
+}
+
+func storeGreetingAudioToCache(key string, audio []byte) {
+	if len(audio) == 0 {
+		return
+	}
+
+	audioCopy := make([]byte, len(audio))
+	copy(audioCopy, audio)
+
+	greetingAudioCacheMu.Lock()
+	defer greetingAudioCacheMu.Unlock()
+
+	if _, exists := greetingAudioCache[key]; !exists {
+		greetingAudioOrder = append(greetingAudioOrder, key)
+	}
+	greetingAudioCache[key] = audioCopy
+
+	for len(greetingAudioOrder) > greetingAudioCacheMaxEntries {
+		evictKey := greetingAudioOrder[0]
+		greetingAudioOrder = greetingAudioOrder[1:]
+		delete(greetingAudioCache, evictKey)
+	}
+}
+
+func (s *Session) synthesizeAndSendGreeting(text string) error {
+	if s.ttsProvider == nil {
+		return nil
+	}
+
+	cacheKey := s.greetingCacheKey(text)
+	if cachedAudio, ok := getGreetingAudioFromCache(cacheKey); ok {
+		s.sendTTS(cachedAudio, realtimeTTSSampleRate)
+		return nil
+	}
+
+	audioData, err := s.synthesizeAndSend(text)
+	if err != nil {
+		return err
+	}
+
+	storeGreetingAudioToCache(cacheKey, audioData)
+	return nil
+}
+
+// synthesizeAndSend TTS 合成并发送
+func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
+	if s.ttsProvider == nil {
+		return nil, nil // TTS 不可用时静默跳过
+	}
+
+	audioChan, err := s.ttsProvider.SynthesizeStream(s.ctx, text, tts.SynthesisConfig{
+		Voice:      s.config.Speaker,
+		SampleRate: realtimeTTSSampleRate,
 		Format:     "pcm",
 	})
 	if err != nil {
-		return fmt.Errorf("TTS synthesize: %w", err)
+		return nil, fmt.Errorf("TTS synthesize stream: %w", err)
 	}
 
-	s.sendTTS(audio)
-	return nil
+	receivedAnyAudio := false
+	var fullAudio []byte
+	for chunk := range audioChan {
+		if chunk.Error != nil {
+			return nil, fmt.Errorf("TTS stream chunk: %w", chunk.Error)
+		}
+
+		if len(chunk.Data) > 0 {
+			receivedAnyAudio = true
+			fullAudio = append(fullAudio, chunk.Data...)
+			s.sendTTS(chunk.Data, realtimeTTSSampleRate)
+		}
+
+		if chunk.Done {
+			break
+		}
+	}
+
+	if !receivedAnyAudio {
+		return nil, fmt.Errorf("TTS stream: no audio data received")
+	}
+
+	return fullAudio, nil
 }
 
 // GetMessages 获取对话历史
@@ -382,10 +475,11 @@ func (s *Session) sendResponse(text string) {
 	})
 }
 
-func (s *Session) sendTTS(audio []byte) {
+func (s *Session) sendTTS(audio []byte, sampleRate int) {
 	s.sendJSON(ServerMessage{
-		Type: MsgTypeTTS,
-		Data: base64.StdEncoding.EncodeToString(audio),
+		Type:       MsgTypeTTS,
+		Data:       base64.StdEncoding.EncodeToString(audio),
+		SampleRate: sampleRate,
 	})
 }
 

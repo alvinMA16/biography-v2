@@ -35,11 +35,12 @@ type ClientMessage struct {
 
 // ServerMessage 服务端消息
 type ServerMessage struct {
-	Type    MessageType `json:"type"`
-	Text    string      `json:"text,omitempty"`     // asr/response 时的文字
-	Data    string      `json:"data,omitempty"`     // tts 时的 base64 音频
-	IsFinal bool        `json:"is_final,omitempty"` // asr 是否为最终结果
-	Error   string      `json:"error,omitempty"`    // 错误信息
+	Type       MessageType `json:"type"`
+	Text       string      `json:"text,omitempty"`        // asr/response 时的文字
+	Data       string      `json:"data,omitempty"`        // tts 时的 base64 音频
+	SampleRate int         `json:"sample_rate,omitempty"` // tts 采样率
+	IsFinal    bool        `json:"is_final,omitempty"`    // asr 是否为最终结果
+	Error      string      `json:"error,omitempty"`       // 错误信息
 }
 
 // SessionConfig 会话配置
@@ -47,6 +48,7 @@ type SessionConfig struct {
 	Mode           Mode
 	TopicID        string
 	ConversationID string
+	Speaker        string
 
 	// 用户信息（从数据库加载）
 	UserID      string
