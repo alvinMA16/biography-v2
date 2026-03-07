@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -124,6 +125,7 @@ func (p *Provider) TranscribeStream(ctx context.Context, audioStream <-chan []by
 
 	taskID := uuid.New().String()
 	resultChan := make(chan asr.Result, 100)
+	log.Printf("[AliyunASR] 建立流式识别: task_id=%s format=%s sample_rate=%d", taskID, format, sampleRate)
 
 	// 启动会话
 	session := &transcribeSession{
@@ -162,18 +164,23 @@ type transcribeSession struct {
 	audioStream <-chan []byte
 	resultChan  chan asr.Result
 	mu          sync.Mutex
+	audioChunks int
+	audioBytes  int
 }
 
 // run 运行转写会话
 func (s *transcribeSession) run(ctx context.Context) {
 	defer close(s.resultChan)
 	defer s.conn.Close()
+	log.Printf("[AliyunASR] 会话启动: task_id=%s", s.taskID)
 
 	// 发送开始命令
 	if err := s.sendStart(); err != nil {
+		log.Printf("[AliyunASR] sendStart 失败: task_id=%s err=%v", s.taskID, err)
 		s.resultChan <- asr.Result{IsFinal: true}
 		return
 	}
+	log.Printf("[AliyunASR] sendStart 成功: task_id=%s", s.taskID)
 
 	// 启动消息接收
 	done := make(chan struct{})
@@ -183,13 +190,19 @@ func (s *transcribeSession) run(ctx context.Context) {
 	s.sendAudio(ctx)
 
 	// 发送停止命令
-	s.sendStop()
+	if err := s.sendStop(); err != nil {
+		log.Printf("[AliyunASR] sendStop 失败: task_id=%s err=%v", s.taskID, err)
+	} else {
+		log.Printf("[AliyunASR] sendStop 成功: task_id=%s", s.taskID)
+	}
 
 	// 等待接收完成
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
+		log.Printf("[AliyunASR] 等待完成超时: task_id=%s", s.taskID)
 	}
+	log.Printf("[AliyunASR] 会话结束: task_id=%s chunks=%d bytes=%d", s.taskID, s.audioChunks, s.audioBytes)
 }
 
 // sendStart 发送开始识别命令
@@ -239,16 +252,28 @@ func (s *transcribeSession) sendAudio(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("[AliyunASR] 上下文取消，停止发音频: task_id=%s", s.taskID)
 			return
 		case audio, ok := <-s.audioStream:
 			if !ok {
+				log.Printf("[AliyunASR] 音频流关闭: task_id=%s", s.taskID)
 				return
 			}
 			s.mu.Lock()
 			err := s.conn.WriteMessage(websocket.BinaryMessage, audio)
 			s.mu.Unlock()
 			if err != nil {
+				log.Printf("[AliyunASR] 写音频失败: task_id=%s err=%v", s.taskID, err)
 				return
+			}
+			s.audioChunks++
+			s.audioBytes += len(audio)
+			if s.audioChunks%50 == 0 {
+				avg := 0
+				if s.audioChunks > 0 {
+					avg = s.audioBytes / s.audioChunks
+				}
+				log.Printf("[AliyunASR] 音频上送中: task_id=%s chunks=%d bytes=%d avg_chunk_bytes=%d", s.taskID, s.audioChunks, s.audioBytes, avg)
 			}
 		}
 	}
@@ -266,8 +291,10 @@ func (s *transcribeSession) receiveMessages(done chan struct{}) {
 
 		var resp response
 		if err := json.Unmarshal(message, &resp); err != nil {
+			log.Printf("[AliyunASR] 响应解析失败: task_id=%s err=%v", s.taskID, err)
 			continue
 		}
+		log.Printf("[AliyunASR] 收到事件: task_id=%s name=%s status=%d status_text=%s result_len=%d", s.taskID, resp.Header.Name, resp.Header.Status, resp.Header.StatusText, len(resp.Payload.Result))
 
 		switch resp.Header.Name {
 		case eventSentenceBegin:
@@ -295,6 +322,7 @@ func (s *transcribeSession) receiveMessages(done chan struct{}) {
 
 		case eventFailed:
 			// 识别失败
+			log.Printf("[AliyunASR] 识别失败: task_id=%s status=%d status_text=%s", s.taskID, resp.Header.Status, resp.Header.StatusText)
 			return
 		}
 	}

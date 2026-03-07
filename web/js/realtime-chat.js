@@ -41,6 +41,7 @@ let vadTimer = null;
 let awaitingResponse = false; // 已发送 stop，等待 AI 回复
 let userSpeechActive = false; // 当前是否检测到用户正在说话
 let voiceBars = [];
+let pendingPcmBytes = new Uint8Array(0);
 
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
@@ -406,6 +407,7 @@ async function startRecording() {
         if (audioContext.state === 'suspended') {
             await audioContext.resume();
         }
+        DEBUG_MODE && console.log('录音 AudioContext sampleRate:', audioContext.sampleRate);
 
         inputSource = audioContext.createMediaStreamSource(mediaStream);
         inputSinkGain = audioContext.createGain();
@@ -455,6 +457,7 @@ async function startRecording() {
 
                 // 一次发言结束，通知服务端开始生成回复
                 if (ws && ws.readyState === WebSocket.OPEN) {
+                    flushPendingPCM(true);
                     awaitingResponse = true;
                     ws.send(JSON.stringify({ type: 'stop' }));
                     updateVoiceStatus('正在思考...');
@@ -477,6 +480,7 @@ function stopRecording() {
     awaitingResponse = false;
     userSpeechActive = false;
     sentVoiceSinceLastStop = false;
+    pendingPcmBytes = new Uint8Array(0);
     setVoiceActive(false);
 
     if (audioWorklet) {
@@ -519,11 +523,40 @@ function stopRecording() {
 function sendAudio(pcmData) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    const base64Data = arrayBufferToBase64(pcmData.buffer);
+    const base64Data = arrayBufferToBase64(pcmData);
     ws.send(JSON.stringify({
         type: 'audio',
         data: base64Data
     }));
+}
+
+function queuePCMForSend(pcmInt16) {
+    const newBytes = new Uint8Array(pcmInt16.buffer);
+    const merged = new Uint8Array(pendingPcmBytes.length + newBytes.length);
+    merged.set(pendingPcmBytes, 0);
+    merged.set(newBytes, pendingPcmBytes.length);
+    pendingPcmBytes = merged;
+
+    while (pendingPcmBytes.length >= CHUNK_SIZE) {
+        const chunk = pendingPcmBytes.slice(0, CHUNK_SIZE);
+        sendAudio(chunk.buffer);
+        pendingPcmBytes = pendingPcmBytes.slice(CHUNK_SIZE);
+    }
+}
+
+function flushPendingPCM(forceAll = false) {
+    if (pendingPcmBytes.length === 0) return;
+
+    while (pendingPcmBytes.length >= CHUNK_SIZE) {
+        const chunk = pendingPcmBytes.slice(0, CHUNK_SIZE);
+        sendAudio(chunk.buffer);
+        pendingPcmBytes = pendingPcmBytes.slice(CHUNK_SIZE);
+    }
+
+    if (forceAll && pendingPcmBytes.length > 0) {
+        sendAudio(pendingPcmBytes.buffer);
+        pendingPcmBytes = new Uint8Array(0);
+    }
 }
 
 function handleInputChunk(inputData) {
@@ -531,6 +564,7 @@ function handleInputChunk(inputData) {
     // AI 说话或等待回复期间不送音频，避免误触发和回声干扰
     if (isAISpeaking || awaitingResponse) {
         userSpeechActive = false;
+        pendingPcmBytes = new Uint8Array(0);
         setVoiceLevel(0);
         return;
     }
@@ -566,8 +600,8 @@ function handleInputChunk(inputData) {
 
     // 转换为 16bit PCM
     const pcmData = float32ToPCM16(inputData);
-    // 发送到服务器
-    sendAudio(pcmData);
+    // 聚合成较稳定的包（3200 bytes）后发送到服务器
+    queuePCMForSend(pcmData);
 }
 
 function getAudioWorkletModuleURL() {

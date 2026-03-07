@@ -39,9 +39,9 @@ var (
 
 // Session 实时对话会话
 type Session struct {
-	conn   *websocket.Conn
-	config *SessionConfig
-	state  SessionState
+	conn    *websocket.Conn
+	config  *SessionConfig
+	state   SessionState
 	writeMu sync.Mutex
 
 	// 依赖
@@ -98,6 +98,7 @@ func (s *Session) Run() error {
 	defer func() {
 		log.Printf("[Session] 会话结束: chunks=%d, bytes=%d, state=%d", s.audioChunks, s.audioBytes, s.state)
 	}()
+	log.Printf("[Session] 会话启动: conversation_id=%s mode=%s speaker=%s", s.config.ConversationID, s.config.Mode, s.config.Speaker)
 
 	// 初始化会话
 	if err := s.init(); err != nil {
@@ -135,6 +136,7 @@ func (s *Session) Run() error {
 			}
 
 		case MsgTypeStop:
+			log.Printf("[Session] 收到 stop: 准备结束用户本轮输入")
 			// 用户停止说话，生成回复
 			if err := s.finishUserTurn(); err != nil {
 				log.Printf("[Session] 生成回复错误: %v", err)
@@ -164,13 +166,18 @@ func (s *Session) ensureASRStream() error {
 	if err != nil {
 		return fmt.Errorf("ASR recognize stream: %w", err)
 	}
+	log.Printf("[Session] ASR 流已建立: format=pcm sample_rate=16000")
 
 	s.asrAudioChan = audioChan
 
 	go func() {
+		log.Printf("[Session] ASR 结果协程启动")
 		for result := range resultChan {
 			// 发送 ASR 结果给前端（中间+最终）
 			s.sendASR(result.Text, result.IsFinal)
+			if strings.TrimSpace(result.Text) != "" {
+				log.Printf("[Session] ASR 结果: final=%v len=%d text=%q", result.IsFinal, len(result.Text), truncateForLog(result.Text, 80))
+			}
 
 			s.asrTextMu.Lock()
 			if result.IsFinal {
@@ -184,6 +191,7 @@ func (s *Session) ensureASRStream() error {
 			}
 			s.asrTextMu.Unlock()
 		}
+		log.Printf("[Session] ASR 结果协程结束")
 	}()
 
 	return nil
@@ -194,6 +202,7 @@ func (s *Session) closeASRStream() {
 	defer s.asrMu.Unlock()
 
 	if s.asrAudioChan != nil {
+		log.Printf("[Session] 关闭 ASR 音频流")
 		close(s.asrAudioChan)
 		s.asrAudioChan = nil
 	}
@@ -223,6 +232,7 @@ func (s *Session) init() error {
 	// 发送开场白
 	greeting := s.getGreeting()
 	if greeting != "" {
+		log.Printf("[Session] 发送开场白: len=%d", len(greeting))
 		s.mu.Lock()
 		s.messages = append(s.messages, llm.Message{
 			Role:    "assistant",
@@ -239,7 +249,7 @@ func (s *Session) init() error {
 		}
 	}
 
-	s.state = StateListening
+	s.setState(StateListening, "初始化完成，进入监听")
 	// 通知前端当前轮次已结束，可以开始录音。
 	s.sendDone()
 	return nil
@@ -273,7 +283,11 @@ func (s *Session) handleAudio(audioBase64 string) error {
 	s.audioChunks++
 	s.audioBytes += len(audioData)
 	if s.audioChunks%50 == 0 {
-		log.Printf("[Session] 音频接收中: chunks=%d, bytes=%d", s.audioChunks, s.audioBytes)
+		avg := 0
+		if s.audioChunks > 0 {
+			avg = s.audioBytes / s.audioChunks
+		}
+		log.Printf("[Session] 音频接收中: chunks=%d, bytes=%d, avg_chunk_bytes=%d", s.audioChunks, s.audioBytes, avg)
 	}
 
 	return nil
@@ -293,13 +307,13 @@ func (s *Session) finishUserTurn() error {
 
 	if userText == "" {
 		log.Printf("[Session] stop 收到但未识别到文本，结束本轮并继续监听")
-		s.state = StateListening
+		s.setState(StateListening, "stop 后无识别文本")
 		s.sendDone()
 		return nil
 	}
 
 	log.Printf("[Session] 用户文本确认: len=%d", len(userText))
-	s.state = StateThinking
+	s.setState(StateThinking, "用户文本已确认，准备调用 LLM")
 
 	// 添加用户消息
 	s.mu.Lock()
@@ -312,7 +326,7 @@ func (s *Session) finishUserTurn() error {
 	// 调用 LLM
 	provider, err := s.llmManager.Primary()
 	if err != nil {
-		s.state = StateListening
+		s.setState(StateListening, "LLM provider 获取失败")
 		return fmt.Errorf("LLM not available: %w", err)
 	}
 
@@ -320,10 +334,11 @@ func (s *Session) finishUserTurn() error {
 	messages := make([]llm.Message, len(s.messages))
 	copy(messages, s.messages)
 	s.mu.RUnlock()
+	log.Printf("[Session] 调用 LLM: provider=%s messages=%d", provider.Name(), len(messages))
 
 	resp, err := provider.Chat(s.ctx, messages)
 	if err != nil {
-		s.state = StateListening
+		s.setState(StateListening, "LLM 调用失败")
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 
@@ -342,7 +357,7 @@ func (s *Session) finishUserTurn() error {
 	s.sendResponse(assistantText)
 
 	// TTS 合成
-	s.state = StateSpeaking
+	s.setState(StateSpeaking, "LLM 完成，开始 TTS")
 	if _, err := s.synthesizeAndSend(assistantText); err != nil {
 		log.Printf("[Session] TTS 错误: %v", err)
 	}
@@ -350,7 +365,7 @@ func (s *Session) finishUserTurn() error {
 	// 发送完成信号
 	s.sendDone()
 
-	s.state = StateListening
+	s.setState(StateListening, "本轮完成，继续监听")
 	return nil
 }
 
@@ -481,6 +496,7 @@ func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
 
 	receivedAnyAudio := false
 	var fullAudio []byte
+	chunkCount := 0
 	for chunk := range audioChan {
 		if chunk.Error != nil {
 			return nil, fmt.Errorf("TTS stream chunk: %w", chunk.Error)
@@ -488,6 +504,7 @@ func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
 
 		if len(chunk.Data) > 0 {
 			receivedAnyAudio = true
+			chunkCount++
 			fullAudio = append(fullAudio, chunk.Data...)
 			s.sendTTS(chunk.Data, realtimeTTSSampleRate)
 		}
@@ -500,6 +517,7 @@ func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
 	if !receivedAnyAudio {
 		return nil, fmt.Errorf("TTS stream: no audio data received")
 	}
+	log.Printf("[Session] TTS 输出完成: chunks=%d bytes=%d", chunkCount, len(fullAudio))
 
 	return fullAudio, nil
 }
@@ -567,6 +585,7 @@ func (s *Session) sendTTS(audio []byte, sampleRate int) {
 }
 
 func (s *Session) sendDone() {
+	log.Printf("[Session] 向前端发送 done")
 	s.sendJSON(ServerMessage{
 		Type: MsgTypeDone,
 	})
@@ -577,4 +596,32 @@ func (s *Session) sendError(errMsg string) {
 		Type:  MsgTypeError,
 		Error: errMsg,
 	})
+}
+
+func (s *Session) setState(next SessionState, reason string) {
+	prev := s.state
+	s.state = next
+	log.Printf("[Session] 状态切换: %s -> %s, reason=%s", sessionStateString(prev), sessionStateString(next), reason)
+}
+
+func sessionStateString(state SessionState) string {
+	switch state {
+	case StateIdle:
+		return "idle"
+	case StateListening:
+		return "listening"
+	case StateThinking:
+		return "thinking"
+	case StateSpeaking:
+		return "speaking"
+	default:
+		return fmt.Sprintf("unknown(%d)", state)
+	}
+}
+
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
