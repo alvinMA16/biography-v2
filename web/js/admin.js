@@ -77,6 +77,26 @@ let apiMonitorItems = [];
 let apiMonitorTestResults = {};
 let apiMonitorTraces = {};
 
+function hasValue(v) {
+    return v !== undefined && v !== null;
+}
+
+function normalizeApiTrace(payload, fallbackRequest, fallbackResponse) {
+    const req = hasValue(payload?.raw_request_body)
+        ? payload.raw_request_body
+        : (hasValue(payload?.request_body) ? payload.request_body : fallbackRequest);
+    const resp = hasValue(payload?.raw_response_body)
+        ? payload.raw_response_body
+        : (hasValue(payload?.response_body) ? payload.response_body : fallbackResponse);
+    return {
+        request_body: hasValue(req) ? req : '',
+        response_body: hasValue(resp) ? resp : '',
+        raw_status_code: hasValue(payload?.raw_status_code) ? payload.raw_status_code : null,
+        tested_at: new Date().toISOString(),
+        status: payload?.status || '-',
+    };
+}
+
 function switchTab(tab) {
     // 更新侧边栏选中态
     document.querySelectorAll('.admin-nav-item[data-tab]').forEach(btn => {
@@ -878,15 +898,7 @@ async function loadApiMonitor() {
         apiMonitorItems = data.apis || [];
         apiMonitorTraces = {};
         apiMonitorItems.forEach((item) => {
-            if (item.raw_request_body || item.raw_response_body || item.raw_status_code) {
-                apiMonitorTraces[item.id] = {
-                    request_body: item.raw_request_body || {},
-                    response_body: item.raw_response_body || {},
-                    raw_status_code: item.raw_status_code,
-                    tested_at: new Date().toISOString(),
-                    status: item.status || '-',
-                };
-            }
+            apiMonitorTraces[item.id] = normalizeApiTrace(item, '', '');
         });
         apiMonitorLoaded = true;
         renderApiMonitorTable(apiMonitorItems);
@@ -1001,13 +1013,7 @@ async function testAPI(apiId, btnEl) {
             method: 'POST',
             body: JSON.stringify(body),
         });
-        apiMonitorTraces[apiId] = {
-            request_body: result.raw_request_body || result.request_body || body,
-            response_body: result.raw_response_body || result.response_body || result,
-            raw_status_code: result.raw_status_code,
-            tested_at: new Date().toISOString(),
-            status: 'ok',
-        };
+        apiMonitorTraces[apiId] = normalizeApiTrace(result, body, result);
         apiMonitorTestResults[apiId] = {
             ...result,
             tested_at: new Date().toISOString(),
@@ -1023,8 +1029,11 @@ async function testAPI(apiId, btnEl) {
             } else {
                 target.error = '';
             }
+            if (hasValue(result.raw_request_body)) target.raw_request_body = result.raw_request_body;
+            if (hasValue(result.raw_response_body)) target.raw_response_body = result.raw_response_body;
+            if (hasValue(result.raw_status_code)) target.raw_status_code = result.raw_status_code;
         }
-        setApiMonitorNotice(`测试成功：${apiId}`);
+        setApiMonitorNotice(`测试成功：${apiId}（可点“详情”看原始请求/响应）`);
         patchApiMonitorRow(apiId);
     } catch (e) {
         apiMonitorTestResults[apiId] = {
@@ -1042,15 +1051,17 @@ async function testAPI(apiId, btnEl) {
                 target.latency_ms = e.data.latency_ms;
             }
             target.error = e.message || '测试失败';
+            if (hasValue(e.data?.raw_request_body)) target.raw_request_body = e.data.raw_request_body;
+            if (hasValue(e.data?.raw_response_body)) target.raw_response_body = e.data.raw_response_body;
+            if (hasValue(e.data?.raw_status_code)) target.raw_status_code = e.data.raw_status_code;
         }
-        apiMonitorTraces[apiId] = {
-            request_body: e.data?.raw_request_body || e.data?.request_body || {},
-            response_body: e.data?.raw_response_body || e.data || { error: e.message || '测试失败' },
-            raw_status_code: e.data?.raw_status_code,
-            tested_at: new Date().toISOString(),
-            status: 'error',
-        };
-        setApiMonitorNotice(`测试失败：${apiId} - ${e.message || '请求异常'}`, true);
+        apiMonitorTraces[apiId] = normalizeApiTrace(
+            e.data || {},
+            body,
+            e.data || { error: e.message || '测试失败' }
+        );
+        apiMonitorTraces[apiId].status = 'error';
+        setApiMonitorNotice(`测试失败：${apiId}（可点“详情”看原始请求/响应）`, true);
         patchApiMonitorRow(apiId);
     } finally {
         if (btnEl) {
@@ -1073,7 +1084,7 @@ function showAPITrace(apiId) {
     const resp = document.getElementById('apiTraceResponse');
 
     title.textContent = `API 测试详情 - ${apiId}`;
-    const rawStatus = trace.raw_status_code ? ` · 上游状态码: ${trace.raw_status_code}` : '';
+    const rawStatus = hasValue(trace.raw_status_code) ? ` · 上游状态码: ${trace.raw_status_code}` : '';
     meta.textContent = `状态: ${trace.status || '-'}${rawStatus} · 时间: ${new Date(trace.tested_at).toLocaleString('zh-CN')}`;
     req.value = prettyJSON(trace.request_body);
     resp.value = prettyJSON(trace.response_body);
@@ -1088,12 +1099,7 @@ function closeApiTraceModal() {
 
 function prettyJSON(value) {
     if (typeof value === 'string') {
-        try {
-            const parsed = JSON.parse(value);
-            return JSON.stringify(parsed, null, 2);
-        } catch (_) {
-            return value;
-        }
+        return value;
     }
     try {
         return JSON.stringify(value, null, 2);
