@@ -124,7 +124,7 @@ func (p *Provider) TranscribeStream(ctx context.Context, audioStream <-chan []by
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 
-	taskID := uuid.New().String()
+	taskID := newTaskID()
 	resultChan := make(chan asr.Result, 100)
 	log.Printf("[AliyunASR] 建立流式识别: task_id=%s format=%s sample_rate=%d", taskID, format, sampleRate)
 
@@ -250,6 +250,11 @@ func (s *transcribeSession) sendStop() error {
 
 // 阿里云 NLS 要求 message_id 为 32 位十六进制字符串（无连字符）
 func newMessageID() string {
+	return strings.ReplaceAll(uuid.New().String(), "-", "")
+}
+
+// 阿里云 NLS 的 task_id 同样要求为 32 位十六进制字符串（无连字符）
+func newTaskID() string {
 	return strings.ReplaceAll(uuid.New().String(), "-", "")
 }
 
