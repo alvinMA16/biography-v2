@@ -41,7 +41,7 @@ services:
       ADMIN_API_KEY: ${ADMIN_API_KEY:-}
 
       # LLM
-      LLM_PROVIDER_DEFAULT: gemini
+      LLM_PROVIDER_DEFAULT: ${LLM_PROVIDER_DEFAULT:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: gemini-3.1-flash-image-preview
       GEMINI_PROXY: ${GEMINI_PROXY:-}

@@ -46,6 +46,7 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 		Timeout:   time.Duration(cfg.Timeout) * time.Second,
 	}
 	opts := []option.ClientOption{
+		option.WithAPIKey(cfg.APIKey),
 		option.WithHTTPClient(clientHTTP),
 	}
 
