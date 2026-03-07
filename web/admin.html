@@ -53,6 +53,10 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
                         数据监控
                     </button>
+                    <button class="admin-nav-item" data-tab="api-monitor" onclick="switchTab('api-monitor')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3h8M5 8h14M3 13h18M6 18h12"/></svg>
+                        API监控
+                    </button>
                 </nav>
                 <div class="admin-sidebar-footer">
                     <button class="admin-nav-item admin-logout-btn" onclick="logout()">
@@ -353,6 +357,35 @@
                                     <div class="admin-usage-bars" id="distMessages"></div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API 监控 Tab -->
+                <div id="tabApiMonitor" class="admin-tab-panel">
+                    <header class="admin-panel-header">
+                        <h1>API监控</h1>
+                        <button class="admin-btn admin-btn-sm" onclick="refreshApiMonitor()">刷新状态</button>
+                    </header>
+                    <div class="admin-panel-content">
+                        <div class="admin-card">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>API 名称</th>
+                                        <th>类别</th>
+                                        <th>提供商</th>
+                                        <th>状态</th>
+                                        <th>延迟</th>
+                                        <th>调用接口</th>
+                                        <th>错误信息</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="apiMonitorTableBody">
+                                    <tr><td colspan="8" class="admin-table-empty">加载中...</td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>

@@ -888,6 +888,18 @@ type ProviderStatus struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// APIItem 外部 API 项
+type APIItem struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Category  string `json:"category"` // llm, asr, tts
+	Provider  string `json:"provider"`
+	Status    string `json:"status"` // ok, error, unavailable
+	Endpoint  string `json:"endpoint"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 // HealthCheckResponse 健康检查响应
 type HealthCheckResponse struct {
 	Status    string                    `json:"status"` // healthy, degraded, unhealthy
@@ -1000,6 +1012,247 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 	}
 
 	c.JSON(statusCode, response)
+}
+
+// ListAPIs 列出当前系统接入的外部 API 及可用性
+func (h *Handler) ListAPIs(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+
+	items := make([]APIItem, 0)
+
+	// LLM providers
+	if h.llmManager != nil {
+		llmResults := h.llmManager.HealthCheck(ctx)
+		for _, providerName := range h.llmManager.Available() {
+			item := APIItem{
+				ID:       "llm:" + providerName,
+				Name:     "大模型文本生成",
+				Category: "llm",
+				Provider: providerName,
+				Status:   "ok",
+				Endpoint: "/api/admin/llm/providers/" + providerName + "/test",
+			}
+			if err, ok := llmResults[providerName]; ok && err != nil {
+				item.Status = "error"
+				item.Error = err.Error()
+			}
+			items = append(items, item)
+		}
+	}
+
+	// ASR provider
+	if h.asrProvider != nil {
+		start := time.Now()
+		err := h.asrProvider.HealthCheck(ctx)
+		item := APIItem{
+			ID:        "asr",
+			Name:      "语音识别",
+			Category:  "asr",
+			Provider:  h.asrProvider.Name(),
+			Endpoint:  "/api/admin/apis/asr/test",
+			Status:    "ok",
+			LatencyMS: time.Since(start).Milliseconds(),
+		}
+		if err != nil {
+			item.Status = "error"
+			item.Error = err.Error()
+		}
+		items = append(items, item)
+	} else {
+		items = append(items, APIItem{
+			ID:       "asr",
+			Name:     "语音识别",
+			Category: "asr",
+			Provider: "aliyun",
+			Endpoint: "/api/admin/apis/asr/test",
+			Status:   "unavailable",
+			Error:    "not configured",
+		})
+	}
+
+	// TTS provider
+	if h.ttsProvider != nil {
+		start := time.Now()
+		err := h.ttsProvider.HealthCheck(ctx)
+		item := APIItem{
+			ID:        "tts",
+			Name:      "语音合成",
+			Category:  "tts",
+			Provider:  h.ttsProvider.Name(),
+			Endpoint:  "/api/admin/tts/test",
+			Status:    "ok",
+			LatencyMS: time.Since(start).Milliseconds(),
+		}
+		if err != nil {
+			item.Status = "error"
+			item.Error = err.Error()
+		}
+		items = append(items, item)
+	} else {
+		items = append(items, APIItem{
+			ID:       "tts",
+			Name:     "语音合成",
+			Category: "tts",
+			Provider: "doubao",
+			Endpoint: "/api/admin/tts/test",
+			Status:   "unavailable",
+			Error:    "not configured",
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"apis":       items,
+		"updated_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// TestAPI 手动触发单个 API 可用性测试
+func (h *Handler) TestAPI(c *gin.Context) {
+	apiID := c.Param("api_id")
+
+	switch {
+	case strings.HasPrefix(apiID, "llm:"):
+		providerName := strings.TrimPrefix(apiID, "llm:")
+		if providerName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid llm provider"})
+			return
+		}
+		if h.llmManager == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "LLM manager not initialized"})
+			return
+		}
+
+		var req struct {
+			Prompt string `json:"prompt"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		promptText := strings.TrimSpace(req.Prompt)
+		if promptText == "" {
+			promptText = "请仅回复：ok"
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+
+		start := time.Now()
+		resp, err := h.llmManager.ChatWith(ctx, providerName, []llm.Message{
+			{Role: "user", Content: promptText},
+		})
+		latency := time.Since(start).Milliseconds()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"id":         apiID,
+				"status":     "error",
+				"error":      err.Error(),
+				"latency_ms": latency,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"id":           apiID,
+			"status":       "ok",
+			"provider":     providerName,
+			"latency_ms":   latency,
+			"preview_text": resp.Content,
+		})
+		return
+
+	case apiID == "asr":
+		if h.asrProvider == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"id":     apiID,
+				"status": "unavailable",
+				"error":  "ASR provider not configured",
+			})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+		start := time.Now()
+		err := h.asrProvider.HealthCheck(ctx)
+		latency := time.Since(start).Milliseconds()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"id":         apiID,
+				"status":     "error",
+				"provider":   h.asrProvider.Name(),
+				"error":      err.Error(),
+				"latency_ms": latency,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"id":         apiID,
+			"status":     "ok",
+			"provider":   h.asrProvider.Name(),
+			"latency_ms": latency,
+		})
+		return
+
+	case apiID == "tts":
+		if h.ttsProvider == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"id":     apiID,
+				"status": "unavailable",
+				"error":  "TTS provider not configured",
+			})
+			return
+		}
+
+		var req struct {
+			Text       string `json:"text"`
+			Voice      string `json:"voice"`
+			SampleRate int    `json:"sample_rate"`
+			Format     string `json:"format"`
+		}
+		_ = c.ShouldBindJSON(&req)
+
+		text := strings.TrimSpace(req.Text)
+		if text == "" {
+			text = "你好，这是系统连通性测试。"
+		}
+		format := req.Format
+		if format == "" {
+			format = "mp3"
+		}
+		sampleRate := req.SampleRate
+		if sampleRate <= 0 {
+			sampleRate = 24000
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+		defer cancel()
+		start := time.Now()
+		audio, err := h.ttsProvider.Synthesize(ctx, text, tts.SynthesisConfig{
+			Voice:      req.Voice,
+			Format:     format,
+			SampleRate: sampleRate,
+		})
+		latency := time.Since(start).Milliseconds()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"id":         apiID,
+				"status":     "error",
+				"provider":   h.ttsProvider.Name(),
+				"error":      err.Error(),
+				"latency_ms": latency,
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"id":          apiID,
+			"status":      "ok",
+			"provider":    h.ttsProvider.Name(),
+			"audio_bytes": len(audio),
+			"latency_ms":  latency,
+		})
+		return
+	}
+
+	c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported api id"})
 }
 
 // GetLLMProviders 获取 LLM Provider 列表
@@ -1155,7 +1408,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 		"6-10轮":  0,
 		"11-20轮": 0,
 		"21-50轮": 0,
-		"50轮以上": 0,
+		"50轮以上":  0,
 	}
 
 	for _, conv := range conversations {
@@ -1261,10 +1514,10 @@ func (h *Handler) GetStats(c *gin.Context) {
 			"total_memoirs":           totalMemoirs,
 		},
 		"activity": gin.H{
-			"today_active_users":       len(todayActiveUsers),
-			"week_active_users":        len(weekActiveUsers),
-			"today_new_conversations":  todayNewConversations,
-			"today_new_memoirs":        todayNewMemoirs,
+			"today_active_users":      len(todayActiveUsers),
+			"week_active_users":       len(weekActiveUsers),
+			"today_new_conversations": todayNewConversations,
+			"today_new_memoirs":       todayNewMemoirs,
 		},
 		"retention": gin.H{
 			"day1":  retention1,
@@ -1272,10 +1525,10 @@ func (h *Handler) GetStats(c *gin.Context) {
 			"day30": retention30,
 		},
 		"distributions": gin.H{
-			"birth_decade":             mapToDistribution(birthDecadeMap),
-			"hometown_province":        mapToDistribution(hometownMap),
-			"conversations_per_user":   bucketToDistribution(convPerUserBuckets, []string{"0次", "1-2次", "3-5次", "6-10次", "10次以上"}),
-			"memoirs_per_user":         bucketToDistribution(memoirPerUserBuckets, []string{"0篇", "1-2篇", "3-5篇", "6篇以上"}),
+			"birth_decade":              mapToDistribution(birthDecadeMap),
+			"hometown_province":         mapToDistribution(hometownMap),
+			"conversations_per_user":    bucketToDistribution(convPerUserBuckets, []string{"0次", "1-2次", "3-5次", "6-10次", "10次以上"}),
+			"memoirs_per_user":          bucketToDistribution(memoirPerUserBuckets, []string{"0篇", "1-2篇", "3-5篇", "6篇以上"}),
 			"messages_per_conversation": bucketToDistribution(msgCountBuckets, []string{"0-5轮", "6-10轮", "11-20轮", "21-50轮", "50轮以上"}),
 		},
 	})
@@ -1497,10 +1750,10 @@ func (h *Handler) DeleteEraMemory(c *gin.Context) {
 
 	// 记录审计日志
 	h.auditService.Log(c.Request.Context(), audit.CreateInput{
-		Action:      audit.ActionDeleteEraMemory,
-		TargetType:  audit.TargetTypeEraMemory,
-		TargetID:    &memoryID,
-		IPAddress:   c.ClientIP(),
+		Action:     audit.ActionDeleteEraMemory,
+		TargetType: audit.TargetTypeEraMemory,
+		TargetID:   &memoryID,
+		IPAddress:  c.ClientIP(),
 	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "era memory deleted"})
@@ -1609,10 +1862,10 @@ func (h *Handler) DeletePresetTopic(c *gin.Context) {
 
 	// 记录审计日志
 	h.auditService.Log(c.Request.Context(), audit.CreateInput{
-		Action:      audit.ActionDeletePresetTopic,
-		TargetType:  audit.TargetTypePresetTopic,
-		TargetID:    &topicID,
-		IPAddress:   c.ClientIP(),
+		Action:     audit.ActionDeletePresetTopic,
+		TargetType: audit.TargetTypePresetTopic,
+		TargetID:   &topicID,
+		IPAddress:  c.ClientIP(),
 	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "preset topic deleted"})
@@ -1728,10 +1981,10 @@ func (h *Handler) DeleteWelcomeMessage(c *gin.Context) {
 
 	// 记录审计日志
 	h.auditService.Log(c.Request.Context(), audit.CreateInput{
-		Action:      audit.ActionDeleteWelcome,
-		TargetType:  audit.TargetTypeWelcome,
-		TargetID:    &messageID,
-		IPAddress:   c.ClientIP(),
+		Action:     audit.ActionDeleteWelcome,
+		TargetType: audit.TargetTypeWelcome,
+		TargetID:   &messageID,
+		IPAddress:  c.ClientIP(),
 	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "welcome message deleted"})

@@ -60,6 +60,8 @@ type Session struct {
 	// ASR 流（一个会话内复用）
 	asrAudioChan chan []byte
 	asrMu        sync.Mutex
+	audioChunks  int
+	audioBytes   int
 
 	// 上下文取消
 	ctx    context.Context
@@ -92,6 +94,9 @@ func NewSession(
 func (s *Session) Run() error {
 	defer s.cancel()
 	defer s.closeASRStream()
+	defer func() {
+		log.Printf("[Session] 会话结束: chunks=%d, bytes=%d, state=%d", s.audioChunks, s.audioBytes, s.state)
+	}()
 
 	// 初始化会话
 	if err := s.init(); err != nil {
@@ -264,6 +269,12 @@ func (s *Session) handleAudio(audioBase64 string) error {
 	case audioChan <- audioData:
 	}
 
+	s.audioChunks++
+	s.audioBytes += len(audioData)
+	if s.audioChunks%50 == 0 {
+		log.Printf("[Session] 音频接收中: chunks=%d, bytes=%d", s.audioChunks, s.audioBytes)
+	}
+
 	return nil
 }
 
@@ -280,9 +291,13 @@ func (s *Session) finishUserTurn() error {
 	s.asrTextMu.Unlock()
 
 	if userText == "" {
+		log.Printf("[Session] stop 收到但未识别到文本，结束本轮并继续监听")
+		s.state = StateListening
+		s.sendDone()
 		return nil
 	}
 
+	log.Printf("[Session] 用户文本确认: len=%d", len(userText))
 	s.state = StateThinking
 
 	// 添加用户消息
@@ -312,6 +327,7 @@ func (s *Session) finishUserTurn() error {
 	}
 
 	assistantText := strings.TrimSpace(resp.Content)
+	log.Printf("[Session] LLM 回复完成: len=%d", len(assistantText))
 
 	// 添加助手消息
 	s.mu.Lock()

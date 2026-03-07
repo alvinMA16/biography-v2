@@ -215,6 +215,8 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		// 系统监控
 		adminRoutes.GET("/monitor/health", adminHandler.HealthCheck)
 		adminRoutes.GET("/monitor/stats", adminHandler.GetStats)
+		adminRoutes.GET("/apis", adminHandler.ListAPIs)
+		adminRoutes.POST("/apis/:api_id/test", adminHandler.TestAPI)
 	}
 
 	return r

@@ -69,6 +69,8 @@ let welcomeMessagesLoaded = false;
 let presetTopicsLoaded = false;
 let monitoringLoaded = false;
 let monitoringData = null;
+let apiMonitorLoaded = false;
+let apiMonitorItems = [];
 
 function switchTab(tab) {
     // 更新侧边栏选中态
@@ -96,6 +98,9 @@ function switchTab(tab) {
     } else if (tab === 'monitoring') {
         document.getElementById('tabMonitoring').classList.add('active');
         if (!monitoringLoaded) loadMonitoringData();
+    } else if (tab === 'api-monitor') {
+        document.getElementById('tabApiMonitor').classList.add('active');
+        if (!apiMonitorLoaded) loadApiMonitor();
     }
 }
 
@@ -854,6 +859,77 @@ function getRetentionColorClass(value) {
 
 function closeRetentionModal() {
     document.getElementById('retentionModal').style.display = 'none';
+}
+
+// ========== API 监控 ==========
+
+async function loadApiMonitor() {
+    const tbody = document.getElementById('apiMonitorTableBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="8" class="admin-table-empty">加载中...</td></tr>';
+    try {
+        const data = await adminRequest('/admin/apis');
+        apiMonitorItems = data.apis || [];
+        apiMonitorLoaded = true;
+        renderApiMonitorTable(apiMonitorItems);
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="8" class="admin-table-empty">加载失败：${escapeHtml(e.message || '请求失败')}</td></tr>`;
+    }
+}
+
+function refreshApiMonitor() {
+    apiMonitorLoaded = false;
+    loadApiMonitor();
+}
+
+function renderApiMonitorTable(items) {
+    const tbody = document.getElementById('apiMonitorTableBody');
+    if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="admin-table-empty">暂无 API 配置</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+        const statusClass = item.status === 'ok' ? 'badge-yes' : 'badge-no';
+        const latencyText = item.latency_ms ? `${item.latency_ms} ms` : '-';
+        return `
+            <tr>
+                <td>${escapeHtml(item.name || '-')}</td>
+                <td>${escapeHtml((item.category || '-').toUpperCase())}</td>
+                <td>${escapeHtml(item.provider || '-')}</td>
+                <td><span class="admin-badge ${statusClass}">${escapeHtml(item.status || '-')}</span></td>
+                <td>${latencyText}</td>
+                <td><code>${escapeHtml(item.endpoint || '-')}</code></td>
+                <td class="admin-log-detail">${escapeHtml(item.error || '-')}</td>
+                <td class="admin-actions-cell">
+                    <button class="admin-btn admin-btn-sm admin-btn-primary" onclick="testAPI('${String(item.id).replace(/'/g, "\\'")}')">测试</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function testAPI(apiId) {
+    try {
+        const body = {};
+        if (String(apiId).startsWith('llm:')) {
+            body.prompt = '请仅回复：ok';
+        } else if (apiId === 'tts') {
+            body.text = '你好，这是管理后台的 API 连通性测试。';
+            body.format = 'mp3';
+            body.sample_rate = 24000;
+        }
+
+        await adminRequest(`/admin/apis/${encodeURIComponent(apiId)}/test`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        await loadApiMonitor();
+    } catch (e) {
+        alert('测试失败：' + e.message);
+        await loadApiMonitor();
+    }
 }
 
 // ========== 用户详情 ==========
