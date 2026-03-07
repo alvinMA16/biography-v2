@@ -42,6 +42,7 @@ type Session struct {
 	conn   *websocket.Conn
 	config *SessionConfig
 	state  SessionState
+	writeMu sync.Mutex
 
 	// 依赖
 	asrProvider asr.Provider
@@ -535,6 +536,8 @@ func (s *Session) GetConversationText() string {
 // === 发送消息方法 ===
 
 func (s *Session) sendJSON(v interface{}) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if err := s.conn.WriteJSON(v); err != nil {
 		log.Printf("[Session] 发送消息失败: %v", err)
 	}
