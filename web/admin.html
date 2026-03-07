@@ -377,6 +377,7 @@
                                             <th>API 名称</th>
                                             <th>类别</th>
                                             <th>提供商</th>
+                                            <th>模型</th>
                                             <th>状态</th>
                                             <th>延迟</th>
                                             <th>内部入口</th>
@@ -386,7 +387,7 @@
                                         </tr>
                                     </thead>
                                     <tbody id="apiMonitorTableBody">
-                                        <tr><td colspan="9" class="admin-table-empty">加载中...</td></tr>
+                                        <tr><td colspan="10" class="admin-table-empty">加载中...</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -949,6 +950,27 @@
                 <div class="admin-modal-footer">
                     <button class="admin-modal-btn admin-modal-btn-cancel" onclick="closePresetTopicModal()">取消</button>
                     <button class="admin-modal-btn admin-modal-btn-confirm" onclick="savePresetTopic()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API 测试详情弹窗 -->
+    <div class="modal" id="apiTraceModal" style="display:none;" onclick="if(event.target===this)closeApiTraceModal()">
+        <div class="modal-content" style="max-width:860px;">
+            <div class="modal-header">
+                <h2 id="apiTraceTitle">API 测试详情</h2>
+                <button class="btn-close" onclick="closeApiTraceModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom:12px; color:#666; font-size:13px;" id="apiTraceMeta">-</div>
+                <div class="admin-form-group admin-form-full" style="margin-bottom:12px;">
+                    <label>请求体</label>
+                    <textarea id="apiTraceRequest" class="admin-input" rows="8" readonly style="font-family:SF Mono,Fira Code,monospace; font-size:12px;"></textarea>
+                </div>
+                <div class="admin-form-group admin-form-full">
+                    <label>返回结果</label>
+                    <textarea id="apiTraceResponse" class="admin-input" rows="10" readonly style="font-family:SF Mono,Fira Code,monospace; font-size:12px;"></textarea>
                 </div>
             </div>
         </div>

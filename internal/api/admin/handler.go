@@ -894,6 +894,7 @@ type APIItem struct {
 	Name             string `json:"name"`
 	Category         string `json:"category"` // llm, asr, tts
 	Provider         string `json:"provider"`
+	ModelName        string `json:"model_name,omitempty"`
 	IsPrimary        bool   `json:"is_primary,omitempty"`
 	Status           string `json:"status"` // ok, error, unavailable
 	InternalEndpoint string `json:"internal_endpoint"`
@@ -904,6 +905,10 @@ type APIItem struct {
 
 type upstreamEndpointProvider interface {
 	UpstreamEndpoint() string
+}
+
+type modelNameProvider interface {
+	ModelName() string
 }
 
 // HealthCheckResponse 健康检查响应
@@ -1027,38 +1032,54 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 
 	items := make([]APIItem, 0)
 
-	// LLM providers
+	llmTargets := []struct {
+		Name         string
+		DefaultModel string
+	}{
+		{Name: "gemini", DefaultModel: "gemini-2.5-flash"},
+		{Name: "dashscope", DefaultModel: "qwen-plus"},
+	}
+
+	primaryProvider := ""
+	llmResults := map[string]error{}
 	if h.llmManager != nil {
-		primaryProvider := ""
 		if p, err := h.llmManager.Primary(); err == nil && p != nil {
 			primaryProvider = p.Name()
 		}
+		llmResults = h.llmManager.HealthCheck(ctx)
+	}
 
-		llmResults := h.llmManager.HealthCheck(ctx)
-		for _, providerName := range h.llmManager.Available() {
-			upstream := ""
-			if provider, err := h.llmManager.Get(providerName); err == nil {
+	for _, target := range llmTargets {
+		item := APIItem{
+			ID:               "llm:" + target.Name,
+			Name:             "大模型文本生成",
+			Category:         "llm",
+			Provider:         target.Name,
+			ModelName:        target.DefaultModel,
+			IsPrimary:        target.Name == primaryProvider,
+			Status:           "unavailable",
+			InternalEndpoint: "/api/admin/apis/llm:" + target.Name + "/test",
+			Error:            "not configured",
+		}
+
+		if h.llmManager != nil {
+			if provider, err := h.llmManager.Get(target.Name); err == nil {
+				item.Status = "ok"
+				item.Error = ""
 				if ep, ok := provider.(upstreamEndpointProvider); ok {
-					upstream = ep.UpstreamEndpoint()
+					item.UpstreamEndpoint = ep.UpstreamEndpoint()
+				}
+				if mp, ok := provider.(modelNameProvider); ok {
+					item.ModelName = mp.ModelName()
+				}
+				if healthErr, ok := llmResults[target.Name]; ok && healthErr != nil {
+					item.Status = "error"
+					item.Error = healthErr.Error()
 				}
 			}
-
-			item := APIItem{
-				ID:               "llm:" + providerName,
-				Name:             "大模型文本生成",
-				Category:         "llm",
-				Provider:         providerName,
-				IsPrimary:        providerName == primaryProvider,
-				Status:           "ok",
-				InternalEndpoint: "/api/admin/apis/llm:" + providerName + "/test",
-				UpstreamEndpoint: upstream,
-			}
-			if err, ok := llmResults[providerName]; ok && err != nil {
-				item.Status = "error"
-				item.Error = err.Error()
-			}
-			items = append(items, item)
 		}
+
+		items = append(items, item)
 	}
 
 	// ASR provider
@@ -1159,6 +1180,10 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		if promptText == "" {
 			promptText = "请仅回复：ok"
 		}
+		requestBody := gin.H{
+			"provider": providerName,
+			"prompt":   promptText,
+		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
@@ -1171,12 +1196,13 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		if err != nil {
 			errType, errHint := classifyProviderError(err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"id":         apiID,
-				"status":     "error",
-				"error":      err.Error(),
-				"error_type": errType,
-				"error_hint": errHint,
-				"latency_ms": latency,
+				"id":           apiID,
+				"status":       "error",
+				"error":        err.Error(),
+				"error_type":   errType,
+				"error_hint":   errHint,
+				"latency_ms":   latency,
+				"request_body": requestBody,
 			})
 			return
 		}
@@ -1186,6 +1212,12 @@ func (h *Handler) TestAPI(c *gin.Context) {
 			"provider":     providerName,
 			"latency_ms":   latency,
 			"preview_text": resp.Content,
+			"request_body": requestBody,
+			"response_body": gin.H{
+				"content":       resp.Content,
+				"finish_reason": resp.FinishReason,
+				"tokens_used":   resp.TokensUsed,
+			},
 		})
 		return
 
@@ -1201,27 +1233,36 @@ func (h *Handler) TestAPI(c *gin.Context) {
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
+		requestBody := gin.H{
+			"provider": h.asrProvider.Name(),
+			"check":    "HealthCheck",
+		}
 		start := time.Now()
 		err := h.asrProvider.HealthCheck(ctx)
 		latency := time.Since(start).Milliseconds()
 		if err != nil {
 			errType, errHint := classifyProviderError(err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"id":         apiID,
-				"status":     "error",
-				"provider":   h.asrProvider.Name(),
-				"error":      err.Error(),
-				"error_type": errType,
-				"error_hint": errHint,
-				"latency_ms": latency,
+				"id":           apiID,
+				"status":       "error",
+				"provider":     h.asrProvider.Name(),
+				"error":        err.Error(),
+				"error_type":   errType,
+				"error_hint":   errHint,
+				"latency_ms":   latency,
+				"request_body": requestBody,
 			})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"id":         apiID,
-			"status":     "ok",
-			"provider":   h.asrProvider.Name(),
-			"latency_ms": latency,
+			"id":           apiID,
+			"status":       "ok",
+			"provider":     h.asrProvider.Name(),
+			"latency_ms":   latency,
+			"request_body": requestBody,
+			"response_body": gin.H{
+				"message": "health check passed",
+			},
 		})
 		return
 
@@ -1255,6 +1296,13 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		if sampleRate <= 0 {
 			sampleRate = 24000
 		}
+		requestBody := gin.H{
+			"provider":    h.ttsProvider.Name(),
+			"text":        text,
+			"voice":       req.Voice,
+			"format":      format,
+			"sample_rate": sampleRate,
+		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
@@ -1268,23 +1316,28 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		if err != nil {
 			errType, errHint := classifyProviderError(err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"id":         apiID,
-				"status":     "error",
-				"provider":   h.ttsProvider.Name(),
-				"error":      err.Error(),
-				"error_type": errType,
-				"error_hint": errHint,
-				"latency_ms": latency,
+				"id":           apiID,
+				"status":       "error",
+				"provider":     h.ttsProvider.Name(),
+				"error":        err.Error(),
+				"error_type":   errType,
+				"error_hint":   errHint,
+				"latency_ms":   latency,
+				"request_body": requestBody,
 			})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"id":          apiID,
-			"status":      "ok",
-			"provider":    h.ttsProvider.Name(),
-			"audio_bytes": len(audio),
-			"latency_ms":  latency,
+			"id":           apiID,
+			"status":       "ok",
+			"provider":     h.ttsProvider.Name(),
+			"audio_bytes":  len(audio),
+			"latency_ms":   latency,
+			"request_body": requestBody,
+			"response_body": gin.H{
+				"audio_bytes": len(audio),
+			},
 		})
 		return
 	}

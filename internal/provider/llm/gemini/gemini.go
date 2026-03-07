@@ -80,6 +80,11 @@ func (p *Provider) Name() string {
 	return "gemini"
 }
 
+// ModelName 返回当前主模型名称（供监控展示）
+func (p *Provider) ModelName() string {
+	return p.model
+}
+
 // UpstreamEndpoint 返回上游服务地址（供监控展示）
 func (p *Provider) UpstreamEndpoint() string {
 	if p.proxy != "" {

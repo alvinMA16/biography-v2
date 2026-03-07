@@ -75,6 +75,7 @@ let monitoringData = null;
 let apiMonitorLoaded = false;
 let apiMonitorItems = [];
 let apiMonitorTestResults = {};
+let apiMonitorTraces = {};
 
 function switchTab(tab) {
     // 更新侧边栏选中态
@@ -871,14 +872,14 @@ async function loadApiMonitor() {
     const tbody = document.getElementById('apiMonitorTableBody');
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="9" class="admin-table-empty">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="admin-table-empty">加载中...</td></tr>';
     try {
         const data = await adminRequest('/admin/apis');
         apiMonitorItems = data.apis || [];
         apiMonitorLoaded = true;
         renderApiMonitorTable(apiMonitorItems);
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="9" class="admin-table-empty">加载失败：${escapeHtml(e.message || '请求失败')}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="admin-table-empty">加载失败：${escapeHtml(e.message || '请求失败')}</td></tr>`;
     }
 }
 
@@ -890,52 +891,68 @@ function refreshApiMonitor() {
 function renderApiMonitorTable(items) {
     const tbody = document.getElementById('apiMonitorTableBody');
     if (!items || items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="admin-table-empty">暂无 API 配置</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="admin-table-empty">暂无 API 配置</td></tr>';
         return;
     }
 
-    tbody.innerHTML = items.map(item => {
-        const latest = apiMonitorTestResults[item.id] || null;
-        const currentStatus = latest?.status || item.status || '-';
-        const statusClass = currentStatus === 'ok' ? 'badge-yes' : 'badge-no';
-        const latencyValue = latest?.latency_ms ?? item.latency_ms;
-        const latencyText = (latencyValue !== undefined && latencyValue !== null) ? `${latencyValue} ms` : '-';
-        const providerText = item.is_primary ? `${item.provider} (主用)` : (item.provider || '-');
+    tbody.innerHTML = items.map(item => renderApiMonitorRow(item)).join('');
+}
 
-        let resultText = latest?.error || item.error || '-';
-        if (latest?.error_hint) {
-            resultText = `${resultText}（${latest.error_hint}）`;
+function renderApiMonitorRow(item) {
+    const latest = apiMonitorTestResults[item.id] || null;
+    const currentStatus = latest?.status || item.status || '-';
+    const statusClass = currentStatus === 'ok' ? 'badge-yes' : 'badge-no';
+    const latencyValue = latest?.latency_ms ?? item.latency_ms;
+    const latencyText = (latencyValue !== undefined && latencyValue !== null) ? `${latencyValue} ms` : '-';
+    const providerText = item.is_primary ? `${item.provider} (主用)` : (item.provider || '-');
+
+    let resultText = latest?.error || item.error || '-';
+    if (latest?.error_hint) {
+        resultText = `${resultText}（${latest.error_hint}）`;
+    }
+    if (latest && !latest.error) {
+        if (latest.preview_text) {
+            resultText = `LLM返回: ${latest.preview_text}`;
+        } else if (latest.audio_bytes !== undefined) {
+            resultText = `音频字节: ${latest.audio_bytes}`;
+        } else {
+            resultText = '测试成功';
         }
-        if (latest && !latest.error) {
-            if (latest.preview_text) {
-                resultText = `LLM返回: ${latest.preview_text}`;
-            } else if (latest.audio_bytes !== undefined) {
-                resultText = `音频字节: ${latest.audio_bytes}`;
-            } else {
-                resultText = '测试成功';
-            }
-        }
+    }
 
-        const testedAt = latest?.tested_at
-            ? ` · 测试于 ${new Date(latest.tested_at).toLocaleTimeString('zh-CN', { hour12: false })}`
-            : '';
+    const testedAt = latest?.tested_at
+        ? ` · 测试于 ${new Date(latest.tested_at).toLocaleTimeString('zh-CN', { hour12: false })}`
+        : '';
+    const escapedId = String(item.id).replace(/'/g, "\\'");
+    const rowKey = encodeURIComponent(item.id);
 
-        return `
-            <tr>
-                <td>${escapeHtml(item.name || '-')}</td>
-                <td>${escapeHtml((item.category || '-').toUpperCase())}</td>
-                <td>${escapeHtml(providerText)}</td>
-                <td><span class="admin-badge ${statusClass}">${escapeHtml(currentStatus)}</span></td>
-                <td>${latencyText}</td>
-                <td><code>${escapeHtml(item.internal_endpoint || '-')}</code></td>
-                <td><code>${escapeHtml(item.upstream_endpoint || '-')}</code></td>
-                <td class="admin-log-detail admin-api-result">${escapeHtml(resultText)}${escapeHtml(testedAt)}</td>
-                <td class="admin-actions-cell">
-                    <button class="admin-btn admin-btn-sm admin-btn-primary" onclick="testAPI('${String(item.id).replace(/'/g, "\\'")}', this)">测试</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
+    return `
+        <tr data-api-id="${rowKey}">
+            <td>${escapeHtml(item.name || '-')}</td>
+            <td>${escapeHtml((item.category || '-').toUpperCase())}</td>
+            <td>${escapeHtml(providerText)}</td>
+            <td>${escapeHtml(item.model_name || '-')}</td>
+            <td><span class="admin-badge ${statusClass}">${escapeHtml(currentStatus)}</span></td>
+            <td>${latencyText}</td>
+            <td><code>${escapeHtml(item.internal_endpoint || '-')}</code></td>
+            <td><code>${escapeHtml(item.upstream_endpoint || '-')}</code></td>
+            <td class="admin-log-detail admin-api-result">${escapeHtml(resultText)}${escapeHtml(testedAt)}</td>
+            <td class="admin-actions-cell">
+                <button class="admin-btn admin-btn-sm admin-btn-primary" onclick="testAPI('${escapedId}', this)">测试</button>
+                <button class="admin-btn admin-btn-sm" onclick="showAPITrace('${escapedId}')" ${apiMonitorTraces[item.id] ? '' : 'disabled'}>详情</button>
+            </td>
+        </tr>
+    `;
+}
+
+function patchApiMonitorRow(apiId) {
+    const row = document.querySelector(`#apiMonitorTableBody tr[data-api-id="${encodeURIComponent(apiId)}"]`);
+    const item = apiMonitorItems.find(it => it.id === apiId);
+    if (!row || !item) {
+        renderApiMonitorTable(apiMonitorItems);
+        return;
+    }
+    row.outerHTML = renderApiMonitorRow(item);
 }
 
 function setApiMonitorNotice(text, isError = false) {
@@ -964,12 +981,30 @@ async function testAPI(apiId, btnEl) {
             method: 'POST',
             body: JSON.stringify(body),
         });
+        apiMonitorTraces[apiId] = {
+            request_body: result.request_body || body,
+            response_body: result.response_body || result,
+            tested_at: new Date().toISOString(),
+            status: 'ok',
+        };
         apiMonitorTestResults[apiId] = {
             ...result,
             tested_at: new Date().toISOString(),
         };
+        const target = apiMonitorItems.find(it => it.id === apiId);
+        if (target) {
+            target.status = result.status || target.status;
+            if (result.latency_ms !== undefined && result.latency_ms !== null) {
+                target.latency_ms = result.latency_ms;
+            }
+            if (result.error) {
+                target.error = result.error;
+            } else {
+                target.error = '';
+            }
+        }
         setApiMonitorNotice(`测试成功：${apiId}`);
-        await loadApiMonitor();
+        patchApiMonitorRow(apiId);
     } catch (e) {
         apiMonitorTestResults[apiId] = {
             status: 'error',
@@ -979,13 +1014,60 @@ async function testAPI(apiId, btnEl) {
             latency_ms: e.data?.latency_ms,
             tested_at: new Date().toISOString(),
         };
+        const target = apiMonitorItems.find(it => it.id === apiId);
+        if (target) {
+            target.status = 'error';
+            if (e.data?.latency_ms !== undefined && e.data?.latency_ms !== null) {
+                target.latency_ms = e.data.latency_ms;
+            }
+            target.error = e.message || '测试失败';
+        }
+        apiMonitorTraces[apiId] = {
+            request_body: e.data?.request_body || {},
+            response_body: e.data || { error: e.message || '测试失败' },
+            tested_at: new Date().toISOString(),
+            status: 'error',
+        };
         setApiMonitorNotice(`测试失败：${apiId} - ${e.message || '请求异常'}`, true);
-        await loadApiMonitor();
+        patchApiMonitorRow(apiId);
     } finally {
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = '测试';
         }
+    }
+}
+
+function showAPITrace(apiId) {
+    const trace = apiMonitorTraces[apiId];
+    if (!trace) {
+        alert('暂无测试详情，请先点击“测试”');
+        return;
+    }
+
+    const title = document.getElementById('apiTraceTitle');
+    const meta = document.getElementById('apiTraceMeta');
+    const req = document.getElementById('apiTraceRequest');
+    const resp = document.getElementById('apiTraceResponse');
+
+    title.textContent = `API 测试详情 - ${apiId}`;
+    meta.textContent = `状态: ${trace.status || '-'} · 时间: ${new Date(trace.tested_at).toLocaleString('zh-CN')}`;
+    req.value = prettyJSON(trace.request_body);
+    resp.value = prettyJSON(trace.response_body);
+
+    document.getElementById('apiTraceModal').style.display = 'flex';
+}
+
+function closeApiTraceModal() {
+    const modal = document.getElementById('apiTraceModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function prettyJSON(value) {
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch (_) {
+        return String(value || '');
     }
 }
 

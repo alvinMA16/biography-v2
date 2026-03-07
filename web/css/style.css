@@ -1817,7 +1817,7 @@ body {
 }
 
 .admin-api-table {
-    min-width: 1320px;
+    min-width: 1460px;
 }
 
 .admin-api-result {
@@ -1868,7 +1868,7 @@ body {
     }
 
     .admin-api-table {
-        min-width: 1080px;
+        min-width: 1220px;
     }
 }
 
