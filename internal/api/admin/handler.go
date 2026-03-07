@@ -1039,13 +1039,7 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 
 	items := make([]APIItem, 0, 4)
 
-	llmTargets := []struct {
-		Name         string
-		DefaultModel string
-	}{
-		{Name: "gemini", DefaultModel: "gemini-2.5-flash"},
-		{Name: "dashscope", DefaultModel: "qwen-plus"},
-	}
+	llmTargets := []string{"gemini", "dashscope"}
 
 	primaryProvider := ""
 	if h.llmManager != nil {
@@ -1056,19 +1050,18 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 
 	for _, target := range llmTargets {
 		item := APIItem{
-			ID:               "llm:" + target.Name,
+			ID:               "llm:" + target,
 			Name:             "大模型文本生成",
 			Category:         "llm",
-			Provider:         target.Name,
-			ModelName:        target.DefaultModel,
-			IsPrimary:        target.Name == primaryProvider,
+			Provider:         target,
+			IsPrimary:        target == primaryProvider,
 			Status:           "unavailable",
-			InternalEndpoint: "/api/admin/apis/llm:" + target.Name + "/test",
+			InternalEndpoint: "/api/admin/apis/llm:" + target + "/test",
 			Error:            "not configured",
 		}
 
 		if h.llmManager != nil {
-			if provider, err := h.llmManager.Get(target.Name); err == nil {
+			if provider, err := h.llmManager.Get(target); err == nil {
 				item.Status = "error"
 				item.Error = ""
 				if ep, ok := provider.(upstreamEndpointProvider); ok {
@@ -1101,7 +1094,7 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 					// 兜底：如果 provider 没有 raw 方法，至少走一次普通 chat。
 					_, probeErr := provider.Chat(testCtx, []llm.Message{{Role: "user", Content: "hello"}})
 					item.LatencyMS = time.Since(start).Milliseconds()
-					item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","prompt":"hello"}`, target.Name)
+					item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","prompt":"hello"}`, target)
 					item.RawResponseBody = ""
 					item.RawStatusCode = http.StatusOK
 					if probeErr != nil {
