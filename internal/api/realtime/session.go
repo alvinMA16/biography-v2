@@ -52,8 +52,14 @@ type Session struct {
 	messages []llm.Message
 	mu       sync.RWMutex
 
-	// 当前用户输入缓冲
+	// 当前用户输入缓冲（由 ASR 消费协程写入）
 	currentUserText strings.Builder
+	currentASRText  string
+	asrTextMu       sync.Mutex
+
+	// ASR 流（一个会话内复用）
+	asrAudioChan chan []byte
+	asrMu        sync.Mutex
 
 	// 上下文取消
 	ctx    context.Context
@@ -85,6 +91,7 @@ func NewSession(
 // Run 运行会话主循环
 func (s *Session) Run() error {
 	defer s.cancel()
+	defer s.closeASRStream()
 
 	// 初始化会话
 	if err := s.init(); err != nil {
@@ -134,8 +141,66 @@ func (s *Session) Run() error {
 	}
 }
 
+func (s *Session) ensureASRStream() error {
+	if s.asrProvider == nil {
+		return fmt.Errorf("ASR provider not available")
+	}
+
+	s.asrMu.Lock()
+	defer s.asrMu.Unlock()
+
+	if s.asrAudioChan != nil {
+		return nil
+	}
+
+	audioChan := make(chan []byte, 64)
+	resultChan, err := s.asrProvider.TranscribeStream(s.ctx, audioChan, "pcm", 16000)
+	if err != nil {
+		return fmt.Errorf("ASR recognize stream: %w", err)
+	}
+
+	s.asrAudioChan = audioChan
+
+	go func() {
+		for result := range resultChan {
+			// 发送 ASR 结果给前端（中间+最终）
+			s.sendASR(result.Text, result.IsFinal)
+
+			s.asrTextMu.Lock()
+			if result.IsFinal {
+				if result.Text != "" {
+					s.currentUserText.WriteString(result.Text)
+				}
+				s.currentASRText = ""
+			} else if result.Text != "" {
+				// 保留最新中间结果，stop 触发时可兜底使用
+				s.currentASRText = result.Text
+			}
+			s.asrTextMu.Unlock()
+		}
+	}()
+
+	return nil
+}
+
+func (s *Session) closeASRStream() {
+	s.asrMu.Lock()
+	defer s.asrMu.Unlock()
+
+	if s.asrAudioChan != nil {
+		close(s.asrAudioChan)
+		s.asrAudioChan = nil
+	}
+}
+
 // init 初始化会话
 func (s *Session) init() error {
+	if s.asrProvider != nil {
+		if err := s.ensureASRStream(); err != nil {
+			return fmt.Errorf("init ASR stream: %w", err)
+		}
+	}
+
 	// 构建系统 prompt
 	systemPrompt, err := s.buildSystemPrompt()
 	if err != nil {
@@ -174,8 +239,8 @@ func (s *Session) init() error {
 
 // handleAudio 处理音频数据
 func (s *Session) handleAudio(audioBase64 string) error {
-	if s.asrProvider == nil {
-		return fmt.Errorf("ASR provider not available")
+	if err := s.ensureASRStream(); err != nil {
+		return err
 	}
 
 	// 解码 base64 音频
@@ -184,36 +249,33 @@ func (s *Session) handleAudio(audioBase64 string) error {
 		return fmt.Errorf("decode audio: %w", err)
 	}
 
-	// 创建音频 channel
-	audioChan := make(chan []byte, 1)
-	audioChan <- audioData
-	close(audioChan)
-
-	// 发送到 ASR
-	resultChan, err := s.asrProvider.TranscribeStream(s.ctx, audioChan, "pcm", 16000)
-	if err != nil {
-		return fmt.Errorf("ASR recognize: %w", err)
+	s.asrMu.Lock()
+	audioChan := s.asrAudioChan
+	s.asrMu.Unlock()
+	if audioChan == nil {
+		return fmt.Errorf("ASR stream not ready")
 	}
 
-	// 处理 ASR 结果
-	go func() {
-		for result := range resultChan {
-			// 发送 ASR 结果
-			s.sendASR(result.Text, result.IsFinal)
-
-			if result.IsFinal && result.Text != "" {
-				s.currentUserText.WriteString(result.Text)
-			}
-		}
-	}()
+	select {
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	case audioChan <- audioData:
+	}
 
 	return nil
 }
 
 // finishUserTurn 完成用户输入，开始生成回复
 func (s *Session) finishUserTurn() error {
+	s.asrTextMu.Lock()
 	userText := strings.TrimSpace(s.currentUserText.String())
+	if userText == "" {
+		// 有些情况下 stop 比 SentenceEnd 更早到，兜底使用最近中间结果
+		userText = strings.TrimSpace(s.currentASRText)
+	}
 	s.currentUserText.Reset()
+	s.currentASRText = ""
+	s.asrTextMu.Unlock()
 
 	if userText == "" {
 		return nil
