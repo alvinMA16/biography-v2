@@ -42,11 +42,10 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 		return nil, err
 	}
 	clientHTTP := &http.Client{
-		Transport: clientTransport,
+		Transport: &apiKeyTransport{base: clientTransport, apiKey: cfg.APIKey},
 		Timeout:   time.Duration(cfg.Timeout) * time.Second,
 	}
 	opts := []option.ClientOption{
-		option.WithAPIKey(cfg.APIKey),
 		option.WithHTTPClient(clientHTTP),
 	}
 
@@ -78,6 +77,21 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 		modelFast:   modelFast,
 		proxy:       cfg.Proxy,
 	}, nil
+}
+
+// apiKeyTransport 在每个请求的 URL 中注入 API Key。
+// 当使用 option.WithHTTPClient 时，SDK 不会自动添加 API Key，需要手动注入。
+type apiKeyTransport struct {
+	base   http.RoundTripper
+	apiKey string
+}
+
+func (t *apiKeyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	q := r.URL.Query()
+	q.Set("key", t.apiKey)
+	r.URL.RawQuery = q.Encode()
+	return t.base.RoundTrip(r)
 }
 
 func buildTransport(proxy string) (*http.Transport, error) {
