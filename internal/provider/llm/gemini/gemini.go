@@ -19,12 +19,14 @@ import (
 
 // Provider Gemini LLM 提供者
 type Provider struct {
-	client    *genai.Client
-	rawClient *http.Client
-	apiKey    string
-	model     string
-	modelFast string
-	proxy     string
+	client      *genai.Client
+	rawClient   *http.Client
+	clientTrans *http.Transport
+	rawTrans    *http.Transport
+	apiKey      string
+	model       string
+	modelFast   string
+	proxy       string
 }
 
 // New 创建 Gemini 提供者
@@ -34,27 +36,17 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	}
 
 	ctx := context.Background()
+	clientTransport, err := buildTransport(cfg.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	clientHTTP := &http.Client{
+		Transport: clientTransport,
+		Timeout:   time.Duration(cfg.Timeout) * time.Second,
+	}
 	opts := []option.ClientOption{
 		option.WithAPIKey(cfg.APIKey),
-	}
-
-	// 配置代理
-	if cfg.Proxy != "" {
-		proxyURL, err := url.Parse(cfg.Proxy)
-		if err != nil {
-			return nil, fmt.Errorf("gemini: invalid proxy URL: %w", err)
-		}
-
-		transport := &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		}
-
-		httpClient := &http.Client{
-			Transport: transport,
-			Timeout:   time.Duration(cfg.Timeout) * time.Second,
-		}
-
-		opts = append(opts, option.WithHTTPClient(httpClient))
+		option.WithHTTPClient(clientHTTP),
 	}
 
 	client, err := genai.NewClient(ctx, opts...)
@@ -66,14 +58,9 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	modelFast := cfg.ModelFast
 
 	// 创建共享 HTTP 客户端（用于 RawGenerate 等直接 HTTP 调用）
-	rawTransport := &http.Transport{
-		MaxIdleConns:        10,
-		MaxIdleConnsPerHost: 5,
-		IdleConnTimeout:     90 * time.Second,
-	}
-	if cfg.Proxy != "" {
-		proxyURL, _ := url.Parse(cfg.Proxy) // 前面已校验过
-		rawTransport.Proxy = http.ProxyURL(proxyURL)
+	rawTransport, err := buildTransport(cfg.Proxy)
+	if err != nil {
+		return nil, err
 	}
 	rawClient := &http.Client{
 		Transport: rawTransport,
@@ -81,13 +68,37 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	}
 
 	return &Provider{
-		client:    client,
-		rawClient: rawClient,
-		apiKey:    cfg.APIKey,
-		model:     model,
-		modelFast: modelFast,
-		proxy:     cfg.Proxy,
+		client:      client,
+		rawClient:   rawClient,
+		clientTrans: clientTransport,
+		rawTrans:    rawTransport,
+		apiKey:      cfg.APIKey,
+		model:       model,
+		modelFast:   modelFast,
+		proxy:       cfg.Proxy,
 	}, nil
+}
+
+func buildTransport(proxy string) (*http.Transport, error) {
+	trans := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		MaxConnsPerHost:       50,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+
+	if proxy != "" {
+		proxyURL, err := url.Parse(proxy)
+		if err != nil {
+			return nil, fmt.Errorf("gemini: invalid proxy URL: %w", err)
+		}
+		trans.Proxy = http.ProxyURL(proxyURL)
+	}
+	return trans, nil
 }
 
 // Name 返回提供者名称
@@ -244,6 +255,12 @@ func (p *Provider) HealthCheck(ctx context.Context) error {
 
 // Close 关闭客户端
 func (p *Provider) Close() error {
+	if p.clientTrans != nil {
+		p.clientTrans.CloseIdleConnections()
+	}
+	if p.rawTrans != nil {
+		p.rawTrans.CloseIdleConnections()
+	}
 	return p.client.Close()
 }
 
