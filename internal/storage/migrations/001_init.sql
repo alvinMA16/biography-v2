@@ -159,7 +159,7 @@ CREATE TABLE system_configs (
 -- 初始配置
 INSERT INTO system_configs (key, value, description) VALUES
     ('default_llm_provider', 'gemini', '默认 LLM 提供者'),
-    ('default_tts_voice', 'zh_male_shaonianzixin_brayan_v2_saturn_bigtts', '默认 TTS 音色'),
+    ('default_tts_voice', 'zh_male_shaonianzixin_uranus_bigtts', '默认 TTS 音色'),
     ('topic_pool_size', '8', '话题池大小'),
     ('memoir_auto_generate', 'true', '是否自动生成回忆录');
 

@@ -391,12 +391,12 @@ async function submitChangePassword() {
 const RECORDERS = {
     female: {
         name: '忆安',
-        speaker: 'zh_female_nuanyang_v2_saturn_bigtts',
+        speaker: 'zh_female_kefunvsheng_uranus_bigtts',
         greeting: '您好，我是小安。很高兴能成为您的人生记录师，期待听您讲述那些珍贵的回忆。'
     },
     male: {
         name: '言川',
-        speaker: 'zh_male_shaonianzixin_brayan_v2_saturn_bigtts',
+        speaker: 'zh_male_shaonianzixin_uranus_bigtts',
         greeting: '您好，我是小川。能够记录您的人生故事，是我的荣幸。请慢慢讲，我都在听。'
     }
 };

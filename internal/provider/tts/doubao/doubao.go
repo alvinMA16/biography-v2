@@ -49,8 +49,8 @@ func New(cfg tts.ProviderConfig) (*Provider, error) {
 	speakers := cfg.Speakers
 	if len(speakers) == 0 {
 		speakers = []string{
-			"zh_male_shaonianzixin_brayan_v2_saturn_bigtts",
-			"zh_female_nuanyang_v2_saturn_bigtts",
+			"zh_male_shaonianzixin_uranus_bigtts",
+			"zh_female_kefunvsheng_uranus_bigtts",
 		}
 	}
 
@@ -323,13 +323,13 @@ func (p *Provider) SynthesizeStream(ctx context.Context, text string, config tts
 func (p *Provider) ListVoices(ctx context.Context) ([]tts.Voice, error) {
 	voices := []tts.Voice{
 		{
-			ID:          "zh_male_shaonianzixin_brayan_v2_saturn_bigtts",
+			ID:          "zh_male_shaonianzixin_uranus_bigtts",
 			Name:        "少年梓辛 / Brayan 2.0",
 			Gender:      "male",
 			Description: "通用场景男声",
 		},
 		{
-			ID:          "zh_female_nuanyang_v2_saturn_bigtts",
+			ID:          "zh_female_kefunvsheng_uranus_bigtts",
 			Name:        "暖阳女声 2.0",
 			Gender:      "female",
 			Description: "通用场景女声",
