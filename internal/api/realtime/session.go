@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/peizhengma/biography-v2/internal/prompt"
@@ -59,10 +60,11 @@ type Session struct {
 	asrTextMu       sync.Mutex
 
 	// ASR 流（一个会话内复用）
-	asrAudioChan chan []byte
-	asrMu        sync.Mutex
-	audioChunks  int
-	audioBytes   int
+	asrAudioChan    chan []byte
+	asrMu           sync.Mutex
+	audioChunks     int
+	audioBytes      int
+	audioDropStreak int
 
 	// 上下文取消
 	ctx    context.Context
@@ -289,6 +291,20 @@ func (s *Session) handleAudio(audioBase64 string) error {
 	case <-s.ctx.Done():
 		return s.ctx.Err()
 	case audioChan <- audioData:
+		s.audioDropStreak = 0
+	case <-time.After(80 * time.Millisecond):
+		// 不阻塞主循环，音频拥塞时优先丢包并继续会话。
+		s.audioDropStreak++
+		if s.audioDropStreak == 1 || s.audioDropStreak%20 == 0 {
+			log.Printf("[Session] ASR 音频队列拥塞，丢弃音频块: streak=%d", s.audioDropStreak)
+		}
+		// 连续拥塞说明下游可能失活，主动重建 ASR 流。
+		if s.audioDropStreak >= 80 {
+			log.Printf("[Session] ASR 音频连续拥塞，重置 ASR 流")
+			s.audioDropStreak = 0
+			s.closeASRStream()
+		}
+		return nil
 	}
 
 	s.audioChunks++
@@ -306,18 +322,9 @@ func (s *Session) handleAudio(audioBase64 string) error {
 
 // finishUserTurn 完成用户输入，开始生成回复
 func (s *Session) finishUserTurn() error {
-	s.asrTextMu.Lock()
-	userText := strings.TrimSpace(s.currentUserText.String())
-	if userText == "" {
-		// 有些情况下 stop 比 SentenceEnd 更早到，兜底使用最近中间结果
-		userText = strings.TrimSpace(s.currentASRText)
-	}
-	s.currentUserText.Reset()
-	s.currentASRText = ""
-	s.asrTextMu.Unlock()
-
 	// 每轮 stop 后主动结束当前 ASR 会话，避免上游 idle timeout 影响下一轮。
 	s.closeASRStream()
+	userText := s.collectUserTextWithGrace()
 
 	if userText == "" {
 		log.Printf("[Session] stop 收到但未识别到文本，结束本轮并继续监听")
@@ -638,4 +645,41 @@ func truncateForLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// stop 后给 ASR 一小段收尾时间，尽量拿到 SentenceEnd 最终文本，减少尾字丢失。
+func (s *Session) collectUserTextWithGrace() string {
+	readBuffers := func() (string, string) {
+		s.asrTextMu.Lock()
+		defer s.asrTextMu.Unlock()
+		return strings.TrimSpace(s.currentUserText.String()), strings.TrimSpace(s.currentASRText)
+	}
+
+	initialFinal, initialInterim := readBuffers()
+	waitBudget := 250 * time.Millisecond
+	if initialFinal != "" || initialInterim != "" {
+		waitBudget = 800 * time.Millisecond
+	}
+
+	deadline := time.Now().Add(waitBudget)
+	for time.Now().Before(deadline) {
+		finalText, interimText := readBuffers()
+		if finalText != "" && interimText == "" {
+			break
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+
+	s.asrTextMu.Lock()
+	defer s.asrTextMu.Unlock()
+
+	finalText := strings.TrimSpace(s.currentUserText.String())
+	interimText := strings.TrimSpace(s.currentASRText)
+	s.currentUserText.Reset()
+	s.currentASRText = ""
+
+	if finalText != "" {
+		return finalText
+	}
+	return interimText
 }

@@ -598,6 +598,9 @@ function handleInputChunk(inputData) {
         }
         lastVoiceDetectedAt = Date.now();
         sentVoiceSinceLastStop = true;
+    } else if (userSpeechActive && rms >= SPEECH_END_RMS) {
+        // 已进入说话态后，使用更低阈值持续刷新活跃时间，避免尾音被提前截断。
+        lastVoiceDetectedAt = Date.now();
     }
 
     // 未触发起说阈值前不发送（仅缓存预录）
