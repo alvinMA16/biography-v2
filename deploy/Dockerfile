@@ -9,12 +9,18 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 # Install dependencies
 RUN apk add --no-cache git
 
-# Use Aliyun Go proxy
-ENV GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
+# Use multi-proxy fallback chain for better reliability.
+# NOTE: use "|" (not ",") so Go can fallback on transient upstream errors.
+ENV GOPROXY=https://mirrors.aliyun.com/goproxy/|https://goproxy.cn|https://proxy.golang.org|direct
 
 # Copy go mod files
 COPY go.mod go.sum ./
-RUN go mod download
+RUN set -eux; \
+    for i in 1 2 3; do \
+      go mod download && break; \
+      echo "go mod download failed (attempt ${i}), retrying..."; \
+      sleep $((i * 2)); \
+    done
 
 # Copy source code
 COPY . .
