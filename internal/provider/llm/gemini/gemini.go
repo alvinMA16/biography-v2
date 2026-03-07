@@ -63,14 +63,7 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	}
 
 	model := cfg.Model
-	if model == "" {
-		model = "gemini-3.1-flash-image-preview"
-	}
-
 	modelFast := cfg.ModelFast
-	if modelFast == "" {
-		modelFast = "gemini-2.0-flash-lite"
-	}
 
 	// 创建共享 HTTP 客户端（用于 RawGenerate 等直接 HTTP 调用）
 	rawTransport := &http.Transport{

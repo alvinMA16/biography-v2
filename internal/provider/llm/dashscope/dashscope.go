@@ -36,14 +36,7 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	}
 
 	model := cfg.Model
-	if model == "" {
-		model = "qwen3.5-plus"
-	}
-
 	modelFast := cfg.ModelFast
-	if modelFast == "" {
-		modelFast = "qwen-turbo"
-	}
 
 	timeout := cfg.Timeout
 	if timeout == 0 {
