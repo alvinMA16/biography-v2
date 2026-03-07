@@ -1810,6 +1810,22 @@ body {
     text-overflow: ellipsis;
 }
 
+.admin-api-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.admin-api-table {
+    min-width: 1320px;
+}
+
+.admin-api-result {
+    white-space: normal;
+    max-width: 420px;
+    line-height: 1.4;
+}
+
 /* 响应式 */
 @media (max-width: 768px) {
     .admin-layout {
@@ -1849,6 +1865,10 @@ body {
 
     .admin-panel-header {
         padding: 16px 20px;
+    }
+
+    .admin-api-table {
+        min-width: 1080px;
     }
 }
 

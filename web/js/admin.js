@@ -28,7 +28,10 @@ async function adminRequest(endpoint, options = {}) {
     const response = await fetch(url, { ...options, headers });
     if (!response.ok) {
         const err = await response.json().catch(() => ({ error: '请求失败' }));
-        throw new Error(err.error || err.detail || '请求失败');
+        const ex = new Error(err.error || err.detail || '请求失败');
+        ex.data = err;
+        ex.status = response.status;
+        throw ex;
     }
     return response.json();
 }
@@ -71,6 +74,7 @@ let monitoringLoaded = false;
 let monitoringData = null;
 let apiMonitorLoaded = false;
 let apiMonitorItems = [];
+let apiMonitorTestResults = {};
 
 function switchTab(tab) {
     // 更新侧边栏选中态
@@ -867,14 +871,14 @@ async function loadApiMonitor() {
     const tbody = document.getElementById('apiMonitorTableBody');
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="8" class="admin-table-empty">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="admin-table-empty">加载中...</td></tr>';
     try {
         const data = await adminRequest('/admin/apis');
         apiMonitorItems = data.apis || [];
         apiMonitorLoaded = true;
         renderApiMonitorTable(apiMonitorItems);
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="8" class="admin-table-empty">加载失败：${escapeHtml(e.message || '请求失败')}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="admin-table-empty">加载失败：${escapeHtml(e.message || '请求失败')}</td></tr>`;
     }
 }
 
@@ -886,31 +890,66 @@ function refreshApiMonitor() {
 function renderApiMonitorTable(items) {
     const tbody = document.getElementById('apiMonitorTableBody');
     if (!items || items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="admin-table-empty">暂无 API 配置</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="admin-table-empty">暂无 API 配置</td></tr>';
         return;
     }
 
     tbody.innerHTML = items.map(item => {
-        const statusClass = item.status === 'ok' ? 'badge-yes' : 'badge-no';
-        const latencyText = item.latency_ms ? `${item.latency_ms} ms` : '-';
+        const latest = apiMonitorTestResults[item.id] || null;
+        const currentStatus = latest?.status || item.status || '-';
+        const statusClass = currentStatus === 'ok' ? 'badge-yes' : 'badge-no';
+        const latencyValue = latest?.latency_ms ?? item.latency_ms;
+        const latencyText = (latencyValue !== undefined && latencyValue !== null) ? `${latencyValue} ms` : '-';
+        const providerText = item.is_primary ? `${item.provider} (主用)` : (item.provider || '-');
+
+        let resultText = latest?.error || item.error || '-';
+        if (latest?.error_hint) {
+            resultText = `${resultText}（${latest.error_hint}）`;
+        }
+        if (latest && !latest.error) {
+            if (latest.preview_text) {
+                resultText = `LLM返回: ${latest.preview_text}`;
+            } else if (latest.audio_bytes !== undefined) {
+                resultText = `音频字节: ${latest.audio_bytes}`;
+            } else {
+                resultText = '测试成功';
+            }
+        }
+
+        const testedAt = latest?.tested_at
+            ? ` · 测试于 ${new Date(latest.tested_at).toLocaleTimeString('zh-CN', { hour12: false })}`
+            : '';
+
         return `
             <tr>
                 <td>${escapeHtml(item.name || '-')}</td>
                 <td>${escapeHtml((item.category || '-').toUpperCase())}</td>
-                <td>${escapeHtml(item.provider || '-')}</td>
-                <td><span class="admin-badge ${statusClass}">${escapeHtml(item.status || '-')}</span></td>
+                <td>${escapeHtml(providerText)}</td>
+                <td><span class="admin-badge ${statusClass}">${escapeHtml(currentStatus)}</span></td>
                 <td>${latencyText}</td>
-                <td><code>${escapeHtml(item.endpoint || '-')}</code></td>
-                <td class="admin-log-detail">${escapeHtml(item.error || '-')}</td>
+                <td><code>${escapeHtml(item.internal_endpoint || '-')}</code></td>
+                <td><code>${escapeHtml(item.upstream_endpoint || '-')}</code></td>
+                <td class="admin-log-detail admin-api-result">${escapeHtml(resultText)}${escapeHtml(testedAt)}</td>
                 <td class="admin-actions-cell">
-                    <button class="admin-btn admin-btn-sm admin-btn-primary" onclick="testAPI('${String(item.id).replace(/'/g, "\\'")}')">测试</button>
+                    <button class="admin-btn admin-btn-sm admin-btn-primary" onclick="testAPI('${String(item.id).replace(/'/g, "\\'")}', this)">测试</button>
                 </td>
             </tr>
         `;
     }).join('');
 }
 
-async function testAPI(apiId) {
+function setApiMonitorNotice(text, isError = false) {
+    const el = document.getElementById('apiMonitorNotice');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? '#a93226' : '#666';
+}
+
+async function testAPI(apiId, btnEl) {
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = '测试中...';
+    }
     try {
         const body = {};
         if (String(apiId).startsWith('llm:')) {
@@ -921,14 +960,32 @@ async function testAPI(apiId) {
             body.sample_rate = 24000;
         }
 
-        await adminRequest(`/admin/apis/${encodeURIComponent(apiId)}/test`, {
+        const result = await adminRequest(`/admin/apis/${encodeURIComponent(apiId)}/test`, {
             method: 'POST',
             body: JSON.stringify(body),
         });
+        apiMonitorTestResults[apiId] = {
+            ...result,
+            tested_at: new Date().toISOString(),
+        };
+        setApiMonitorNotice(`测试成功：${apiId}`);
         await loadApiMonitor();
     } catch (e) {
-        alert('测试失败：' + e.message);
+        apiMonitorTestResults[apiId] = {
+            status: 'error',
+            error: e.message || '测试失败',
+            error_hint: e.data?.error_hint,
+            error_type: e.data?.error_type,
+            latency_ms: e.data?.latency_ms,
+            tested_at: new Date().toISOString(),
+        };
+        setApiMonitorNotice(`测试失败：${apiId} - ${e.message || '请求异常'}`, true);
         await loadApiMonitor();
+    } finally {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.textContent = '测试';
+        }
     }
 }
 

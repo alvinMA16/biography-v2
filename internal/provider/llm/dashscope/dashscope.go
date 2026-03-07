@@ -66,6 +66,11 @@ func (p *Provider) Name() string {
 	return "dashscope"
 }
 
+// UpstreamEndpoint 返回上游服务地址（供监控展示）
+func (p *Provider) UpstreamEndpoint() string {
+	return p.baseURL + "/chat/completions"
+}
+
 // chatRequest OpenAI 兼容的请求格式
 type chatRequest struct {
 	Model    string        `json:"model"`

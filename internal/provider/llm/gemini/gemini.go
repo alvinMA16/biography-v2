@@ -19,6 +19,7 @@ type Provider struct {
 	client    *genai.Client
 	model     string
 	modelFast string
+	proxy     string
 }
 
 // New 创建 Gemini 提供者
@@ -70,12 +71,21 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 		client:    client,
 		model:     model,
 		modelFast: modelFast,
+		proxy:     cfg.Proxy,
 	}, nil
 }
 
 // Name 返回提供者名称
 func (p *Provider) Name() string {
 	return "gemini"
+}
+
+// UpstreamEndpoint 返回上游服务地址（供监控展示）
+func (p *Provider) UpstreamEndpoint() string {
+	if p.proxy != "" {
+		return p.proxy
+	}
+	return "https://generativelanguage.googleapis.com"
 }
 
 // Chat 同步对话

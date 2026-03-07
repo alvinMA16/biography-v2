@@ -74,6 +74,11 @@ func (p *Provider) Name() string {
 	return "aliyun"
 }
 
+// UpstreamEndpoint 返回上游服务地址（供监控展示）
+func (p *Provider) UpstreamEndpoint() string {
+	return "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1 (token: https://nls-meta.cn-shanghai.aliyuncs.com/)"
+}
+
 // Transcribe 单次语音识别
 func (p *Provider) Transcribe(ctx context.Context, audio []byte, format string, sampleRate int) (*asr.Result, error) {
 	// 创建音频通道
@@ -198,14 +203,14 @@ func (s *transcribeSession) sendStart() error {
 			"appkey":     s.appKey,
 		},
 		"payload": map[string]interface{}{
-			"format":                             s.format,
-			"sample_rate":                        s.sampleRate,
-			"enable_intermediate_result":         s.config.EnableIntermediateResult,
-			"enable_punctuation_prediction":      s.config.EnablePunctuation,
-			"enable_inverse_text_normalization":  s.config.EnableITN,
-			"max_sentence_silence":               s.config.MaxSentenceSilence,
-			"enable_words":                       s.config.EnableWords,
-			"disfluency":                         s.config.Disfluency,
+			"format":                            s.format,
+			"sample_rate":                       s.sampleRate,
+			"enable_intermediate_result":        s.config.EnableIntermediateResult,
+			"enable_punctuation_prediction":     s.config.EnablePunctuation,
+			"enable_inverse_text_normalization": s.config.EnableITN,
+			"max_sentence_silence":              s.config.MaxSentenceSilence,
+			"enable_words":                      s.config.EnableWords,
+			"disfluency":                        s.config.Disfluency,
 		},
 	}
 
@@ -298,11 +303,11 @@ func (s *transcribeSession) receiveMessages(done chan struct{}) {
 // response 响应结构
 type response struct {
 	Header struct {
-		Namespace string `json:"namespace"`
-		Name      string `json:"name"`
-		Status    int    `json:"status"`
+		Namespace  string `json:"namespace"`
+		Name       string `json:"name"`
+		Status     int    `json:"status"`
 		StatusText string `json:"status_text"`
-		TaskID    string `json:"task_id"`
+		TaskID     string `json:"task_id"`
 	} `json:"header"`
 	Payload struct {
 		Index      int     `json:"index"`

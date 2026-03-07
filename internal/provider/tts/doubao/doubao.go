@@ -70,6 +70,11 @@ func (p *Provider) Name() string {
 	return "doubao"
 }
 
+// UpstreamEndpoint 返回上游服务地址（供监控展示）
+func (p *Provider) UpstreamEndpoint() string {
+	return apiURL
+}
+
 // V3Request V3 API 请求结构
 type V3Request struct {
 	User      V3User      `json:"user"`

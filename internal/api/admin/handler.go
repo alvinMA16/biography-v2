@@ -890,14 +890,20 @@ type ProviderStatus struct {
 
 // APIItem 外部 API 项
 type APIItem struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Category  string `json:"category"` // llm, asr, tts
-	Provider  string `json:"provider"`
-	Status    string `json:"status"` // ok, error, unavailable
-	Endpoint  string `json:"endpoint"`
-	LatencyMS int64  `json:"latency_ms,omitempty"`
-	Error     string `json:"error,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Category         string `json:"category"` // llm, asr, tts
+	Provider         string `json:"provider"`
+	IsPrimary        bool   `json:"is_primary,omitempty"`
+	Status           string `json:"status"` // ok, error, unavailable
+	InternalEndpoint string `json:"internal_endpoint"`
+	UpstreamEndpoint string `json:"upstream_endpoint,omitempty"`
+	LatencyMS        int64  `json:"latency_ms"`
+	Error            string `json:"error,omitempty"`
+}
+
+type upstreamEndpointProvider interface {
+	UpstreamEndpoint() string
 }
 
 // HealthCheckResponse 健康检查响应
@@ -1023,15 +1029,29 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 
 	// LLM providers
 	if h.llmManager != nil {
+		primaryProvider := ""
+		if p, err := h.llmManager.Primary(); err == nil && p != nil {
+			primaryProvider = p.Name()
+		}
+
 		llmResults := h.llmManager.HealthCheck(ctx)
 		for _, providerName := range h.llmManager.Available() {
+			upstream := ""
+			if provider, err := h.llmManager.Get(providerName); err == nil {
+				if ep, ok := provider.(upstreamEndpointProvider); ok {
+					upstream = ep.UpstreamEndpoint()
+				}
+			}
+
 			item := APIItem{
-				ID:       "llm:" + providerName,
-				Name:     "大模型文本生成",
-				Category: "llm",
-				Provider: providerName,
-				Status:   "ok",
-				Endpoint: "/api/admin/llm/providers/" + providerName + "/test",
+				ID:               "llm:" + providerName,
+				Name:             "大模型文本生成",
+				Category:         "llm",
+				Provider:         providerName,
+				IsPrimary:        providerName == primaryProvider,
+				Status:           "ok",
+				InternalEndpoint: "/api/admin/apis/llm:" + providerName + "/test",
+				UpstreamEndpoint: upstream,
 			}
 			if err, ok := llmResults[providerName]; ok && err != nil {
 				item.Status = "error"
@@ -1046,13 +1066,16 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 		start := time.Now()
 		err := h.asrProvider.HealthCheck(ctx)
 		item := APIItem{
-			ID:        "asr",
-			Name:      "语音识别",
-			Category:  "asr",
-			Provider:  h.asrProvider.Name(),
-			Endpoint:  "/api/admin/apis/asr/test",
-			Status:    "ok",
-			LatencyMS: time.Since(start).Milliseconds(),
+			ID:               "asr",
+			Name:             "语音识别",
+			Category:         "asr",
+			Provider:         h.asrProvider.Name(),
+			InternalEndpoint: "/api/admin/apis/asr/test",
+			Status:           "ok",
+			LatencyMS:        time.Since(start).Milliseconds(),
+		}
+		if ep, ok := h.asrProvider.(upstreamEndpointProvider); ok {
+			item.UpstreamEndpoint = ep.UpstreamEndpoint()
 		}
 		if err != nil {
 			item.Status = "error"
@@ -1061,13 +1084,14 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 		items = append(items, item)
 	} else {
 		items = append(items, APIItem{
-			ID:       "asr",
-			Name:     "语音识别",
-			Category: "asr",
-			Provider: "aliyun",
-			Endpoint: "/api/admin/apis/asr/test",
-			Status:   "unavailable",
-			Error:    "not configured",
+			ID:               "asr",
+			Name:             "语音识别",
+			Category:         "asr",
+			Provider:         "aliyun",
+			InternalEndpoint: "/api/admin/apis/asr/test",
+			UpstreamEndpoint: "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1 (token: https://nls-meta.cn-shanghai.aliyuncs.com/)",
+			Status:           "unavailable",
+			Error:            "not configured",
 		})
 	}
 
@@ -1076,13 +1100,16 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 		start := time.Now()
 		err := h.ttsProvider.HealthCheck(ctx)
 		item := APIItem{
-			ID:        "tts",
-			Name:      "语音合成",
-			Category:  "tts",
-			Provider:  h.ttsProvider.Name(),
-			Endpoint:  "/api/admin/tts/test",
-			Status:    "ok",
-			LatencyMS: time.Since(start).Milliseconds(),
+			ID:               "tts",
+			Name:             "语音合成",
+			Category:         "tts",
+			Provider:         h.ttsProvider.Name(),
+			InternalEndpoint: "/api/admin/apis/tts/test",
+			Status:           "ok",
+			LatencyMS:        time.Since(start).Milliseconds(),
+		}
+		if ep, ok := h.ttsProvider.(upstreamEndpointProvider); ok {
+			item.UpstreamEndpoint = ep.UpstreamEndpoint()
 		}
 		if err != nil {
 			item.Status = "error"
@@ -1091,13 +1118,14 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 		items = append(items, item)
 	} else {
 		items = append(items, APIItem{
-			ID:       "tts",
-			Name:     "语音合成",
-			Category: "tts",
-			Provider: "doubao",
-			Endpoint: "/api/admin/tts/test",
-			Status:   "unavailable",
-			Error:    "not configured",
+			ID:               "tts",
+			Name:             "语音合成",
+			Category:         "tts",
+			Provider:         "doubao",
+			InternalEndpoint: "/api/admin/apis/tts/test",
+			UpstreamEndpoint: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+			Status:           "unavailable",
+			Error:            "not configured",
 		})
 	}
 
@@ -1141,10 +1169,13 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		})
 		latency := time.Since(start).Milliseconds()
 		if err != nil {
+			errType, errHint := classifyProviderError(err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"id":         apiID,
 				"status":     "error",
 				"error":      err.Error(),
+				"error_type": errType,
+				"error_hint": errHint,
 				"latency_ms": latency,
 			})
 			return
@@ -1174,11 +1205,14 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		err := h.asrProvider.HealthCheck(ctx)
 		latency := time.Since(start).Milliseconds()
 		if err != nil {
+			errType, errHint := classifyProviderError(err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"id":         apiID,
 				"status":     "error",
 				"provider":   h.asrProvider.Name(),
 				"error":      err.Error(),
+				"error_type": errType,
+				"error_hint": errHint,
 				"latency_ms": latency,
 			})
 			return
@@ -1232,11 +1266,14 @@ func (h *Handler) TestAPI(c *gin.Context) {
 		})
 		latency := time.Since(start).Milliseconds()
 		if err != nil {
+			errType, errHint := classifyProviderError(err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"id":         apiID,
 				"status":     "error",
 				"provider":   h.ttsProvider.Name(),
 				"error":      err.Error(),
+				"error_type": errType,
+				"error_hint": errHint,
 				"latency_ms": latency,
 			})
 			return
@@ -1253,6 +1290,47 @@ func (h *Handler) TestAPI(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported api id"})
+}
+
+func classifyProviderError(errMsg string) (string, string) {
+	msg := strings.ToLower(errMsg)
+
+	switch {
+	case strings.Contains(msg, "quota"),
+		strings.Contains(msg, "insufficient"),
+		strings.Contains(msg, "arrear"),
+		strings.Contains(msg, "balance"),
+		strings.Contains(msg, "欠费"),
+		strings.Contains(msg, "余额"):
+		return "billing_or_quota", "可能是额度不足、账户欠费或配额超限，请检查供应商账单与配额。"
+	case strings.Contains(msg, "unauthorized"),
+		strings.Contains(msg, "forbidden"),
+		strings.Contains(msg, "invalid api key"),
+		strings.Contains(msg, "signature"),
+		strings.Contains(msg, "permission"),
+		strings.Contains(msg, "access denied"),
+		strings.Contains(msg, "401"),
+		strings.Contains(msg, "403"):
+		return "auth_or_permission", "可能是 AK/SK、Token、签名或权限配置问题，请核对密钥与权限。"
+	case strings.Contains(msg, "deadline exceeded"),
+		strings.Contains(msg, "timeout"),
+		strings.Contains(msg, "i/o timeout"):
+		return "timeout", "请求超时，可能是网络波动或上游服务响应慢。"
+	case strings.Contains(msg, "no such host"),
+		strings.Contains(msg, "dial tcp"),
+		strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "network is unreachable"),
+		strings.Contains(msg, "tls"):
+		return "network", "网络或 DNS/TLS 连接异常，请检查服务器网络与上游域名连通性。"
+	case strings.Contains(msg, "429"),
+		strings.Contains(msg, "503"),
+		strings.Contains(msg, "rate limit"),
+		strings.Contains(msg, "service unavailable"),
+		strings.Contains(msg, "too many requests"):
+		return "provider_unstable", "上游服务限流或不可用，建议重试并关注供应商状态页。"
+	default:
+		return "unknown", "未知错误，请结合完整报错和供应商日志继续排查。"
+	}
 }
 
 // GetLLMProviders 获取 LLM Provider 列表

@@ -368,24 +368,28 @@
                         <button class="admin-btn admin-btn-sm" onclick="refreshApiMonitor()">刷新状态</button>
                     </header>
                     <div class="admin-panel-content">
+                        <div id="apiMonitorNotice" class="admin-empty-state" style="padding:10px 4px 14px; text-align:left;">点击“测试”可手动触发外部 API 请求并查看结果。</div>
                         <div class="admin-card">
-                            <table class="admin-table">
-                                <thead>
-                                    <tr>
-                                        <th>API 名称</th>
-                                        <th>类别</th>
-                                        <th>提供商</th>
-                                        <th>状态</th>
-                                        <th>延迟</th>
-                                        <th>调用接口</th>
-                                        <th>错误信息</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="apiMonitorTableBody">
-                                    <tr><td colspan="8" class="admin-table-empty">加载中...</td></tr>
-                                </tbody>
-                            </table>
+                            <div class="admin-api-table-wrap">
+                                <table class="admin-table admin-api-table">
+                                    <thead>
+                                        <tr>
+                                            <th>API 名称</th>
+                                            <th>类别</th>
+                                            <th>提供商</th>
+                                            <th>状态</th>
+                                            <th>延迟</th>
+                                            <th>内部入口</th>
+                                            <th>外部上游</th>
+                                            <th>错误信息/结果</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="apiMonitorTableBody">
+                                        <tr><td colspan="9" class="admin-table-empty">加载中...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
