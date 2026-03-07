@@ -1031,10 +1031,10 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 
 // ListAPIs 列出当前系统接入的外部 API 及可用性
 func (h *Handler) ListAPIs(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
 	defer cancel()
 
-	items := make([]APIItem, 0)
+	items := make([]APIItem, 0, 4)
 
 	llmTargets := []struct {
 		Name         string
@@ -1045,12 +1045,10 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 	}
 
 	primaryProvider := ""
-	llmResults := map[string]error{}
 	if h.llmManager != nil {
 		if p, err := h.llmManager.Primary(); err == nil && p != nil {
 			primaryProvider = p.Name()
 		}
-		llmResults = h.llmManager.HealthCheck(ctx)
 	}
 
 	for _, target := range llmTargets {
@@ -1068,7 +1066,7 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 
 		if h.llmManager != nil {
 			if provider, err := h.llmManager.Get(target.Name); err == nil {
-				item.Status = "ok"
+				item.Status = "error"
 				item.Error = ""
 				if ep, ok := provider.(upstreamEndpointProvider); ok {
 					item.UpstreamEndpoint = ep.UpstreamEndpoint()
@@ -1076,10 +1074,35 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 				if mp, ok := provider.(modelNameProvider); ok {
 					item.ModelName = mp.ModelName()
 				}
-				if healthErr, ok := llmResults[target.Name]; ok && healthErr != nil {
-					item.Status = "error"
-					item.Error = healthErr.Error()
+
+				// 外部可用性实时探测：发一个最小请求。
+				testCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+				start := time.Now()
+				rawProvider, ok := provider.(rawLLMRequestProvider)
+				if ok {
+					_, _, statusCode, probeErr := rawProvider.RawGenerate(testCtx, "hello")
+					item.LatencyMS = time.Since(start).Milliseconds()
+					if probeErr != nil {
+						item.Status = "error"
+						item.Error = probeErr.Error()
+					} else if statusCode >= 200 && statusCode < 300 {
+						item.Status = "ok"
+					} else {
+						item.Status = "error"
+						item.Error = fmt.Sprintf("upstream status code: %d", statusCode)
+					}
+				} else {
+					// 兜底：如果 provider 没有 raw 方法，至少走一次普通 chat。
+					_, probeErr := provider.Chat(testCtx, []llm.Message{{Role: "user", Content: "hello"}})
+					item.LatencyMS = time.Since(start).Milliseconds()
+					if probeErr != nil {
+						item.Status = "error"
+						item.Error = probeErr.Error()
+					} else {
+						item.Status = "ok"
+					}
 				}
+				cancel()
 			}
 		}
 
@@ -1088,8 +1111,6 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 
 	// ASR provider
 	if h.asrProvider != nil {
-		start := time.Now()
-		err := h.asrProvider.HealthCheck(ctx)
 		item := APIItem{
 			ID:               "asr",
 			Name:             "语音识别",
@@ -1097,14 +1118,20 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			Provider:         h.asrProvider.Name(),
 			InternalEndpoint: "/api/admin/apis/asr/test",
 			Status:           "ok",
-			LatencyMS:        time.Since(start).Milliseconds(),
 		}
 		if ep, ok := h.asrProvider.(upstreamEndpointProvider); ok {
 			item.UpstreamEndpoint = ep.UpstreamEndpoint()
 		}
-		if err != nil {
+
+		// 外部可用性实时探测：ASR health check（token/网关连通）。
+		testCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		start := time.Now()
+		probeErr := h.asrProvider.HealthCheck(testCtx)
+		item.LatencyMS = time.Since(start).Milliseconds()
+		cancel()
+		if probeErr != nil {
 			item.Status = "error"
-			item.Error = err.Error()
+			item.Error = probeErr.Error()
 		}
 		items = append(items, item)
 	} else {
@@ -1122,8 +1149,6 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 
 	// TTS provider
 	if h.ttsProvider != nil {
-		start := time.Now()
-		err := h.ttsProvider.HealthCheck(ctx)
 		item := APIItem{
 			ID:               "tts",
 			Name:             "语音合成",
@@ -1131,14 +1156,23 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			Provider:         h.ttsProvider.Name(),
 			InternalEndpoint: "/api/admin/apis/tts/test",
 			Status:           "ok",
-			LatencyMS:        time.Since(start).Milliseconds(),
 		}
 		if ep, ok := h.ttsProvider.(upstreamEndpointProvider); ok {
 			item.UpstreamEndpoint = ep.UpstreamEndpoint()
 		}
-		if err != nil {
+
+		// 外部可用性实时探测：发最短文本合成请求。
+		testCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		start := time.Now()
+		_, probeErr := h.ttsProvider.Synthesize(testCtx, "你好", tts.SynthesisConfig{
+			Format:     "mp3",
+			SampleRate: 24000,
+		})
+		item.LatencyMS = time.Since(start).Milliseconds()
+		cancel()
+		if probeErr != nil {
 			item.Status = "error"
-			item.Error = err.Error()
+			item.Error = probeErr.Error()
 		}
 		items = append(items, item)
 	} else {
