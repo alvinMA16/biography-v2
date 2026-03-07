@@ -39,6 +39,8 @@ let lastVoiceDetectedAt = 0; // 最近一次检测到人声时间戳
 let sentVoiceSinceLastStop = false;
 let vadTimer = null;
 let awaitingResponse = false; // 已发送 stop，等待 AI 回复
+let userSpeechActive = false; // 当前是否检测到用户正在说话
+let voiceBars = [];
 
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
@@ -46,6 +48,11 @@ const SAMPLE_RATE_OUTPUT = 16000; // 输出采样率（实时 TTS 默认值）
 const CHUNK_SIZE = 3200;          // 每次发送的音频块大小
 const VAD_SILENCE_MS = 650;       // 语音结束静音阈值（越小响应越快，但误触发风险更高）
 const AUDIO_WORKLET_PROCESSOR_NAME = 'pcm-capture-processor';
+const SPEECH_START_RMS = 0.007;   // 超过该阈值判定为开始说话
+const SPEECH_END_RMS = 0.0045;    // 低于该阈值并持续静音判定为结束
+const VISUAL_NOISE_FLOOR = 0.0035;
+const VISUAL_BASE_HEIGHTS = [6, 8, 10, 8, 6];
+const VISUAL_GAIN = 30;
 
 // 页面加载
 window.onload = async function() {
@@ -223,6 +230,7 @@ function handleServerMessage(message) {
             isAISpeaking = true;
             awaitingResponse = false;
             sentVoiceSinceLastStop = false;
+            userSpeechActive = false;
             setVoiceActive(false);
             updateVoiceStatus('记录师正在说话');
             queueAudio(base64ToArrayBuffer(message.data), message.sample_rate || SAMPLE_RATE_OUTPUT);
@@ -258,6 +266,7 @@ function handleServerMessage(message) {
             isAISpeaking = false;
             awaitingResponse = false;
             sentVoiceSinceLastStop = false;
+            userSpeechActive = false;
             lastVoiceDetectedAt = Date.now();
             setVoiceActive(false);
             updateVoiceStatus('请开始说话');
@@ -319,6 +328,7 @@ function handleEvent(event, payload) {
             isAISpeaking = true;
             awaitingResponse = false;
             sentVoiceSinceLastStop = false;
+            userSpeechActive = false;
             currentAIResponse = '';  // 清空，准备接收新回复
             // 第一次 TTS：直接显示后端发来的开场白（不依赖豆包回显）
             if (isFirstTTS && pendingGreeting) {
@@ -335,6 +345,7 @@ function handleEvent(event, payload) {
             isAISpeaking = false;
             awaitingResponse = false;
             sentVoiceSinceLastStop = false;
+            userSpeechActive = false;
             lastVoiceDetectedAt = Date.now();
             // 第一次 TTS 结束后，标记已完成开场白
             if (isFirstTTS) {
@@ -351,7 +362,7 @@ function handleEvent(event, payload) {
             // 不更新上方文字，保持显示AI之前的问题
             clearAudioQueue();
             updateVoiceStatus('正在聆听...');
-            setVoiceActive(true);
+            // 音波由本地实时音量驱动，不在这里强制激活
             break;
 
         case 459:
@@ -430,9 +441,10 @@ async function startRecording() {
 
         isRecording = true;
         updateVoiceStatus('请开始说话');
-        setVoiceActive(true);
+        setVoiceActive(false);
         lastVoiceDetectedAt = Date.now();
         sentVoiceSinceLastStop = false;
+        userSpeechActive = false;
 
         if (!vadTimer) {
             vadTimer = setInterval(() => {
@@ -448,6 +460,7 @@ async function startRecording() {
                     updateVoiceStatus('正在思考...');
                 }
                 sentVoiceSinceLastStop = false;
+                userSpeechActive = false;
                 setVoiceActive(false);
             }, 300);
         }
@@ -461,6 +474,10 @@ async function startRecording() {
 
 function stopRecording() {
     isRecording = false;
+    awaitingResponse = false;
+    userSpeechActive = false;
+    sentVoiceSinceLastStop = false;
+    setVoiceActive(false);
 
     if (audioWorklet) {
         audioWorklet.port.onmessage = null;
@@ -512,16 +529,39 @@ function sendAudio(pcmData) {
 function handleInputChunk(inputData) {
     if (!isRecording || !isConnected || !inputData) return;
     // AI 说话或等待回复期间不送音频，避免误触发和回声干扰
-    if (isAISpeaking || awaitingResponse) return;
+    if (isAISpeaking || awaitingResponse) {
+        userSpeechActive = false;
+        setVoiceLevel(0);
+        return;
+    }
 
     let energy = 0;
     for (let i = 0; i < inputData.length; i++) {
         energy += inputData[i] * inputData[i];
     }
     const rms = Math.sqrt(energy / inputData.length);
-    if (rms > 0.015) {
+    setVoiceLevel(rms);
+    if (rms >= SPEECH_START_RMS) {
+        if (!userSpeechActive) {
+            userSpeechActive = true;
+            updateVoiceStatus('正在聆听...');
+            setVoiceActive(true);
+        }
         lastVoiceDetectedAt = Date.now();
         sentVoiceSinceLastStop = true;
+    } else if (userSpeechActive && rms < SPEECH_END_RMS) {
+        if (Date.now() - lastVoiceDetectedAt >= VAD_SILENCE_MS) {
+            userSpeechActive = false;
+            setVoiceActive(false);
+            if (!awaitingResponse && !isAISpeaking) {
+                updateVoiceStatus('请开始说话');
+            }
+        }
+    }
+
+    // 只在检测到真实人声时发送音频，降低噪音与误触发
+    if (!userSpeechActive) {
+        return;
     }
 
     // 转换为 16bit PCM
@@ -565,6 +605,7 @@ function initPlayback() {
     gainNode.connect(playbackContext.destination);
 
     DEBUG_MODE && console.log('播放上下文采样率:', playbackContext.sampleRate);
+    initVoiceBars();
 }
 
 async function queueAudio(audioData, sampleRate) {
@@ -745,10 +786,37 @@ function updateVoiceStatus(text) {
 // 设置音波动画状态
 function setVoiceActive(active) {
     const visualizer = document.getElementById('voiceVisualizer');
+    if (!visualizer) return;
     if (active) {
         visualizer.classList.add('active');
     } else {
         visualizer.classList.remove('active');
+        setVoiceLevel(0);
+    }
+}
+
+function initVoiceBars() {
+    const visualizer = document.getElementById('voiceVisualizer');
+    if (!visualizer) return;
+    voiceBars = Array.from(visualizer.querySelectorAll('.bar'));
+    setVoiceLevel(0);
+}
+
+function setVoiceLevel(rms) {
+    if (!voiceBars || voiceBars.length === 0) return;
+
+    const normalized = Math.max(0, Math.min(1, (rms - VISUAL_NOISE_FLOOR) / 0.03));
+    const smooth = Math.pow(normalized, 0.7);
+    const active = smooth > 0.02;
+
+    for (let i = 0; i < voiceBars.length; i++) {
+        const bar = voiceBars[i];
+        const base = VISUAL_BASE_HEIGHTS[i] || 6;
+        const distanceToCenter = Math.abs(i - 2);
+        const weight = 1 - distanceToCenter * 0.2; // 中间条更敏感
+        const height = base + VISUAL_GAIN * smooth * Math.max(0.4, weight);
+        bar.style.height = `${active ? height.toFixed(1) : base}px`;
+        bar.style.opacity = active ? '0.95' : '0.38';
     }
 }
 
