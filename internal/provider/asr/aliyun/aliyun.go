@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -209,7 +210,7 @@ func (s *transcribeSession) run(ctx context.Context) {
 func (s *transcribeSession) sendStart() error {
 	msg := map[string]interface{}{
 		"header": map[string]interface{}{
-			"message_id": uuid.New().String(),
+			"message_id": newMessageID(),
 			"task_id":    s.taskID,
 			"namespace":  namespaceTranscriber,
 			"name":       eventStartTranscription,
@@ -234,7 +235,7 @@ func (s *transcribeSession) sendStart() error {
 func (s *transcribeSession) sendStop() error {
 	msg := map[string]interface{}{
 		"header": map[string]interface{}{
-			"message_id": uuid.New().String(),
+			"message_id": newMessageID(),
 			"task_id":    s.taskID,
 			"namespace":  namespaceTranscriber,
 			"name":       eventStopTranscription,
@@ -245,6 +246,11 @@ func (s *transcribeSession) sendStop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conn.WriteJSON(msg)
+}
+
+// 阿里云 NLS 要求 message_id 为 32 位十六进制字符串（无连字符）
+func newMessageID() string {
+	return strings.ReplaceAll(uuid.New().String(), "-", "")
 }
 
 // sendAudio 发送音频数据
