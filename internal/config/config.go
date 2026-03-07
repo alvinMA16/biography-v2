@@ -81,7 +81,7 @@ func Load() (*Config, error) {
 		DoubaoAppID:      getEnv("DOUBAO_APP_ID", ""),
 		DoubaoAccessKey:  getEnv("DOUBAO_ACCESS_KEY", ""),
 		DoubaoResourceID: getEnv("DOUBAO_RESOURCE_ID", "seed-tts-2.0"),
-		DoubaoSpeakers:   getEnvList("DOUBAO_SPEAKERS", []string{"zh_male_dayi_saturn_bigtts", "zh_female_mizai_saturn_bigtts"}),
+		DoubaoSpeakers:   getEnvList("DOUBAO_SPEAKERS", []string{"zh_male_shaonianzixin_brayan_v2_saturn_bigtts", "zh_female_nuanyang_v2_saturn_bigtts"}),
 	}
 
 	return cfg, nil

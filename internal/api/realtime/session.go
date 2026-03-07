@@ -234,6 +234,8 @@ func (s *Session) init() error {
 	}
 
 	s.state = StateListening
+	// 通知前端当前轮次已结束，可以开始录音。
+	s.sendDone()
 	return nil
 }
 
