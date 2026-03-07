@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1034,10 +1035,11 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 
 // ListAPIs 列出当前系统接入的外部 API 及可用性
 func (h *Handler) ListAPIs(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 14*time.Second)
 	defer cancel()
 
-	items := make([]APIItem, 0, 4)
+	// 预分配固定 4 个槽位：[gemini, dashscope, asr, tts]，保证顺序稳定。
+	items := make([]APIItem, 4)
 
 	llmTargets := []string{"gemini", "dashscope"}
 
@@ -1048,8 +1050,12 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 		}
 	}
 
-	for _, target := range llmTargets {
-		item := APIItem{
+	var wg sync.WaitGroup
+
+	// --- LLM providers (并行) ---
+	for i, target := range llmTargets {
+		item := &items[i]
+		*item = APIItem{
 			ID:               "llm:" + target,
 			Name:             "大模型文本生成",
 			Category:         "llm",
@@ -1060,60 +1066,65 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			Error:            "not configured",
 		}
 
-		if h.llmManager != nil {
-			if provider, err := h.llmManager.Get(target); err == nil {
-				item.Status = "error"
-				item.Error = ""
-				if ep, ok := provider.(upstreamEndpointProvider); ok {
-					item.UpstreamEndpoint = ep.UpstreamEndpoint()
-				}
-				if mp, ok := provider.(modelNameProvider); ok {
-					item.ModelName = mp.ModelName()
-				}
-
-				// 外部可用性实时探测：发一个最小请求。
-				testCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-				start := time.Now()
-				rawProvider, ok := provider.(rawLLMRequestProvider)
-				if ok {
-					rawReq, rawResp, statusCode, probeErr := rawProvider.RawGenerate(testCtx, "hello")
-					item.LatencyMS = time.Since(start).Milliseconds()
-					item.RawRequestBody = rawReq
-					item.RawResponseBody = rawResp
-					item.RawStatusCode = statusCode
-					if probeErr != nil {
-						item.Status = "error"
-						item.Error = probeErr.Error()
-					} else if statusCode >= 200 && statusCode < 300 {
-						item.Status = "ok"
-					} else {
-						item.Status = "error"
-						item.Error = fmt.Sprintf("upstream status code: %d", statusCode)
-					}
-				} else {
-					// 兜底：如果 provider 没有 raw 方法，至少走一次普通 chat。
-					_, probeErr := provider.Chat(testCtx, []llm.Message{{Role: "user", Content: "hello"}})
-					item.LatencyMS = time.Since(start).Milliseconds()
-					item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","prompt":"hello"}`, target)
-					item.RawResponseBody = ""
-					item.RawStatusCode = http.StatusOK
-					if probeErr != nil {
-						item.Status = "error"
-						item.Error = probeErr.Error()
-					} else {
-						item.Status = "ok"
-					}
-				}
-				cancel()
-			}
+		if h.llmManager == nil {
+			continue
+		}
+		provider, err := h.llmManager.Get(target)
+		if err != nil {
+			continue
 		}
 
-		items = append(items, item)
+		item.Status = "error"
+		item.Error = ""
+		if ep, ok := provider.(upstreamEndpointProvider); ok {
+			item.UpstreamEndpoint = ep.UpstreamEndpoint()
+		}
+		if mp, ok := provider.(modelNameProvider); ok {
+			item.ModelName = mp.ModelName()
+		}
+
+		wg.Add(1)
+		go func(item *APIItem, provider llm.Provider, target string) {
+			defer wg.Done()
+			testCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			defer cancel()
+			start := time.Now()
+			rawProvider, ok := provider.(rawLLMRequestProvider)
+			if ok {
+				rawReq, rawResp, statusCode, probeErr := rawProvider.RawGenerate(testCtx, "hello")
+				item.LatencyMS = time.Since(start).Milliseconds()
+				item.RawRequestBody = rawReq
+				item.RawResponseBody = rawResp
+				item.RawStatusCode = statusCode
+				if probeErr != nil {
+					item.Status = "error"
+					item.Error = probeErr.Error()
+				} else if statusCode >= 200 && statusCode < 300 {
+					item.Status = "ok"
+				} else {
+					item.Status = "error"
+					item.Error = fmt.Sprintf("upstream status code: %d", statusCode)
+				}
+			} else {
+				_, probeErr := provider.Chat(testCtx, []llm.Message{{Role: "user", Content: "hello"}})
+				item.LatencyMS = time.Since(start).Milliseconds()
+				item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","prompt":"hello"}`, target)
+				item.RawResponseBody = ""
+				item.RawStatusCode = http.StatusOK
+				if probeErr != nil {
+					item.Status = "error"
+					item.Error = probeErr.Error()
+				} else {
+					item.Status = "ok"
+				}
+			}
+		}(item, provider, target)
 	}
 
-	// ASR provider
+	// --- ASR provider (并行) ---
+	asrItem := &items[2]
 	if h.asrProvider != nil {
-		item := APIItem{
+		*asrItem = APIItem{
 			ID:               "asr",
 			Name:             "语音识别",
 			Category:         "asr",
@@ -1122,27 +1133,28 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			Status:           "ok",
 		}
 		if ep, ok := h.asrProvider.(upstreamEndpointProvider); ok {
-			item.UpstreamEndpoint = ep.UpstreamEndpoint()
+			asrItem.UpstreamEndpoint = ep.UpstreamEndpoint()
 		}
 
-		// 外部可用性实时探测：ASR health check（token/网关连通）。
-		testCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		start := time.Now()
-		probeErr := h.asrProvider.HealthCheck(testCtx)
-		item.LatencyMS = time.Since(start).Milliseconds()
-		item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","check":"HealthCheck"}`, h.asrProvider.Name())
-		if probeErr == nil {
-			item.RawResponseBody = `{"message":"health check passed"}`
-			item.RawStatusCode = http.StatusOK
-		}
-		cancel()
-		if probeErr != nil {
-			item.Status = "error"
-			item.Error = probeErr.Error()
-		}
-		items = append(items, item)
+		wg.Add(1)
+		go func(item *APIItem) {
+			defer wg.Done()
+			testCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			start := time.Now()
+			probeErr := h.asrProvider.HealthCheck(testCtx)
+			item.LatencyMS = time.Since(start).Milliseconds()
+			item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","check":"HealthCheck"}`, h.asrProvider.Name())
+			if probeErr == nil {
+				item.RawResponseBody = `{"message":"health check passed"}`
+				item.RawStatusCode = http.StatusOK
+			} else {
+				item.Status = "error"
+				item.Error = probeErr.Error()
+			}
+		}(asrItem)
 	} else {
-		items = append(items, APIItem{
+		*asrItem = APIItem{
 			ID:               "asr",
 			Name:             "语音识别",
 			Category:         "asr",
@@ -1151,12 +1163,13 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			UpstreamEndpoint: "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1 (token: https://nls-meta.cn-shanghai.aliyuncs.com/)",
 			Status:           "unavailable",
 			Error:            "not configured",
-		})
+		}
 	}
 
-	// TTS provider
+	// --- TTS provider (并行) ---
+	ttsItem := &items[3]
 	if h.ttsProvider != nil {
-		item := APIItem{
+		*ttsItem = APIItem{
 			ID:               "tts",
 			Name:             "语音合成",
 			Category:         "tts",
@@ -1165,30 +1178,31 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			Status:           "ok",
 		}
 		if ep, ok := h.ttsProvider.(upstreamEndpointProvider); ok {
-			item.UpstreamEndpoint = ep.UpstreamEndpoint()
+			ttsItem.UpstreamEndpoint = ep.UpstreamEndpoint()
 		}
 
-		// 外部可用性实时探测：发最短文本合成请求。
-		testCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		start := time.Now()
-		_, probeErr := h.ttsProvider.Synthesize(testCtx, "你好", tts.SynthesisConfig{
-			Format:     "mp3",
-			SampleRate: 24000,
-		})
-		item.LatencyMS = time.Since(start).Milliseconds()
-		item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","text":"你好","format":"mp3","sample_rate":24000}`, h.ttsProvider.Name())
-		if probeErr == nil {
-			item.RawResponseBody = `{"message":"tts synthesize success"}`
-			item.RawStatusCode = http.StatusOK
-		}
-		cancel()
-		if probeErr != nil {
-			item.Status = "error"
-			item.Error = probeErr.Error()
-		}
-		items = append(items, item)
+		wg.Add(1)
+		go func(item *APIItem) {
+			defer wg.Done()
+			testCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			defer cancel()
+			start := time.Now()
+			_, probeErr := h.ttsProvider.Synthesize(testCtx, "你好", tts.SynthesisConfig{
+				Format:     "mp3",
+				SampleRate: 24000,
+			})
+			item.LatencyMS = time.Since(start).Milliseconds()
+			item.RawRequestBody = fmt.Sprintf(`{"provider":"%s","text":"你好","format":"mp3","sample_rate":24000}`, h.ttsProvider.Name())
+			if probeErr == nil {
+				item.RawResponseBody = `{"message":"tts synthesize success"}`
+				item.RawStatusCode = http.StatusOK
+			} else {
+				item.Status = "error"
+				item.Error = probeErr.Error()
+			}
+		}(ttsItem)
 	} else {
-		items = append(items, APIItem{
+		*ttsItem = APIItem{
 			ID:               "tts",
 			Name:             "语音合成",
 			Category:         "tts",
@@ -1197,8 +1211,10 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 			UpstreamEndpoint: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
 			Status:           "unavailable",
 			Error:            "not configured",
-		})
+		}
 	}
+
+	wg.Wait()
 
 	c.JSON(http.StatusOK, gin.H{
 		"apis":       items,
