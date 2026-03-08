@@ -116,23 +116,18 @@ func (s *Service) EndConversation(ctx context.Context, conversationID, userID uu
 		Conversation: conv,
 	}
 
-	// 根据用户是否完成资料填写，执行不同流程
+	// 资料未完整时，先结束对话，不做 AI 自动资料写回。
 	if !u.ProfileCompleted {
-		// 未完成资料收集，尝试从对话提取
-		log.Printf("[Flow] 用户未完成信息收集，尝试提取: %s", userID)
-		s.extractAndUpdateProfile(ctx, u, conversationText)
-		result.Message = "对话已结束，已尝试提取用户信息"
+		log.Printf("[Flow] 用户资料未完整，跳过自动资料写回: %s", userID)
+		result.Message = "对话已结束，用户资料待人工完善"
 	} else {
-		// 已完成资料收集，执行正常流程
-		// 1. 生成摘要
+		// 资料完整时，执行正常流程。
 		summary := s.generateSummary(ctx, conv, conversationText)
 		result.Summary = summary
 
-		// 2. 自动生成回忆录
 		m := s.autoGenerateMemoir(ctx, u, conv, conversationText)
 		result.Memoir = m
 
-		// 3. 根据回忆录数量处理话题池
 		s.handleTopicPool(ctx, u)
 
 		result.Message = "对话已结束，已生成摘要和回忆录"
@@ -205,8 +200,7 @@ func (s *Service) processConversationEnd(conversationID, userID uuid.UUID) {
 	}
 
 	if !u.ProfileCompleted {
-		log.Printf("[Flow] 用户未完成信息收集，尝试提取...")
-		s.extractAndUpdateProfile(ctx, u, conversationText)
+		log.Printf("[Flow] 用户资料未完整，跳过自动资料写回: %s", userID)
 	} else {
 		// 生成摘要
 		s.generateSummary(ctx, conv, conversationText)
@@ -219,52 +213,6 @@ func (s *Service) processConversationEnd(conversationID, userID uuid.UUID) {
 	}
 
 	log.Printf("[Flow] 对话结束任务完成: %s", conversationID)
-}
-
-// extractAndUpdateProfile 从对话提取并更新用户信息
-func (s *Service) extractAndUpdateProfile(ctx context.Context, u *user.User, conversationText string) {
-	profile, err := s.llmService.ExtractProfile(ctx, conversationText)
-	if err != nil {
-		log.Printf("[Flow] 提取用户信息失败: %v", err)
-		return
-	}
-
-	// 更新用户信息
-	input := &user.UpdateProfileInput{}
-	hasUpdate := false
-
-	if profile.Nickname != nil && u.Nickname == nil {
-		input.Nickname = profile.Nickname
-		hasUpdate = true
-	}
-	if profile.PreferredName != nil && u.PreferredName == nil {
-		input.PreferredName = profile.PreferredName
-		hasUpdate = true
-	}
-	if profile.Gender != nil && u.Gender == nil {
-		input.Gender = profile.Gender
-		hasUpdate = true
-	}
-	if profile.BirthYear != nil && u.BirthYear == nil {
-		input.BirthYear = profile.BirthYear
-		hasUpdate = true
-	}
-	if profile.Hometown != nil && u.Hometown == nil {
-		input.Hometown = profile.Hometown
-		hasUpdate = true
-	}
-	if profile.MainCity != nil && u.MainCity == nil {
-		input.MainCity = profile.MainCity
-		hasUpdate = true
-	}
-
-	if hasUpdate {
-		if _, err := s.userService.UpdateProfile(ctx, u.ID, input); err != nil {
-			log.Printf("[Flow] 更新用户信息失败: %v", err)
-		} else {
-			log.Printf("[Flow] 已从对话提取并更新用户信息")
-		}
-	}
 }
 
 // generateSummary 生成对话摘要
@@ -381,6 +329,7 @@ func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User) 
 		BirthYear:       u.BirthYear,
 		Hometown:        derefString(u.Hometown),
 		MainCity:        derefString(u.MainCity),
+		EraMemories:     derefString(u.EraMemories),
 		ExistingTopics:  existingTitles,
 		ExistingMemoirs: memoirTitles,
 		Count:           8,
@@ -393,10 +342,11 @@ func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User) 
 	// 创建话题
 	for _, t := range topics {
 		input := &topic.CreateTopicInput{
-			Title:    t.Title,
-			Greeting: t.Greeting,
-			Context:  t.Context,
-			Source:   topic.SourceAI,
+			Title:      t.Title,
+			Greeting:   t.Greeting,
+			Context:    t.Context,
+			EraContext: t.EraContext,
+			Source:     topic.SourceAI,
 		}
 		if _, err := s.topicService.Create(ctx, u.ID, input); err != nil {
 			log.Printf("[Flow] 创建话题失败: %v", err)

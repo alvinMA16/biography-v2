@@ -115,7 +115,6 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 		BirthYear:      user.BirthYear,
 		Hometown:       deref(user.Hometown),
 		MainCity:       deref(user.MainCity),
-		EraMemories:    deref(user.EraMemories),
 	}
 
 	// 支持前端直接传 topic/greeting/context（兼容当前 web 端）
@@ -140,6 +139,7 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 				config.TopicTitle = topic.Title
 				config.TopicGreeting = deref(topic.Greeting)
 				config.TopicContext = deref(topic.Context)
+				config.EraMemories = deref(topic.EraContext)
 			}
 		}
 	}

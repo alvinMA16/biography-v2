@@ -21,7 +21,7 @@ type User struct {
 	MainCity      *string `json:"main_city" db:"main_city"`
 
 	// 状态
-	ProfileCompleted  bool    `json:"profile_completed" db:"profile_completed"`
+	ProfileCompleted  bool    `json:"profile_completed" db:"profile_completed"` // 人工资料是否已完整
 	EraMemories       *string `json:"era_memories" db:"era_memories"`
 	EraMemoriesStatus string  `json:"era_memories_status" db:"era_memories_status"` // none/pending/generating/completed/failed
 	IsAdmin           bool    `json:"is_admin" db:"is_admin"`

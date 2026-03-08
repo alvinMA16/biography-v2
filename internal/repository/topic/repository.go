@@ -29,8 +29,8 @@ func New(pool *pgxpool.Pool) *Repository {
 // Create 创建话题
 func (r *Repository) Create(ctx context.Context, t *topic.TopicCandidate) error {
 	query := `
-		INSERT INTO topic_candidates (id, user_id, title, greeting, context, status, source, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO topic_candidates (id, user_id, title, greeting, context, era_context, status, source, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -39,6 +39,7 @@ func (r *Repository) Create(ctx context.Context, t *topic.TopicCandidate) error 
 		t.Title,
 		t.Greeting,
 		t.Context,
+		t.EraContext,
 		t.Status,
 		t.Source,
 		t.CreatedAt,
@@ -57,8 +58,8 @@ func (r *Repository) CreateBatch(ctx context.Context, topics []*topic.TopicCandi
 	batch := &pgx.Batch{}
 	for _, t := range topics {
 		batch.Queue(
-			`INSERT INTO topic_candidates (id, user_id, title, greeting, context, status, source, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-			t.ID, t.UserID, t.Title, t.Greeting, t.Context, t.Status, t.Source, t.CreatedAt, t.UpdatedAt,
+			`INSERT INTO topic_candidates (id, user_id, title, greeting, context, era_context, status, source, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			t.ID, t.UserID, t.Title, t.Greeting, t.Context, t.EraContext, t.Status, t.Source, t.CreatedAt, t.UpdatedAt,
 		)
 	}
 
@@ -77,7 +78,7 @@ func (r *Repository) CreateBatch(ctx context.Context, topics []*topic.TopicCandi
 // GetByID 根据 ID 获取话题
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*topic.TopicCandidate, error) {
 	query := `
-		SELECT id, user_id, title, greeting, context, status, source, created_at, updated_at
+		SELECT id, user_id, title, greeting, context, era_context, status, source, created_at, updated_at
 		FROM topic_candidates
 		WHERE id = $1
 	`
@@ -89,6 +90,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*topic.TopicCan
 		&t.Title,
 		&t.Greeting,
 		&t.Context,
+		&t.EraContext,
 		&t.Status,
 		&t.Source,
 		&t.CreatedAt,
@@ -109,7 +111,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*topic.TopicCan
 func (r *Repository) Update(ctx context.Context, t *topic.TopicCandidate) error {
 	query := `
 		UPDATE topic_candidates
-		SET title = $2, greeting = $3, context = $4, status = $5, updated_at = $6
+		SET title = $2, greeting = $3, context = $4, era_context = $5, status = $6, updated_at = $7
 		WHERE id = $1
 	`
 
@@ -118,6 +120,7 @@ func (r *Repository) Update(ctx context.Context, t *topic.TopicCandidate) error 
 		t.Title,
 		t.Greeting,
 		t.Context,
+		t.EraContext,
 		t.Status,
 		time.Now(),
 	)
@@ -186,7 +189,7 @@ func (r *Repository) List(ctx context.Context, userID uuid.UUID, status *topic.S
 
 	// 获取列表
 	query := fmt.Sprintf(`
-		SELECT id, user_id, title, greeting, context, status, source, created_at, updated_at
+		SELECT id, user_id, title, greeting, context, era_context, status, source, created_at, updated_at
 		FROM topic_candidates
 		%s
 		ORDER BY created_at DESC
@@ -210,6 +213,7 @@ func (r *Repository) List(ctx context.Context, userID uuid.UUID, status *topic.S
 			&t.Title,
 			&t.Greeting,
 			&t.Context,
+			&t.EraContext,
 			&t.Status,
 			&t.Source,
 			&t.CreatedAt,
@@ -227,7 +231,7 @@ func (r *Repository) List(ctx context.Context, userID uuid.UUID, status *topic.S
 // GetAvailableTopics 获取可用话题（状态为 approved 的话题）
 func (r *Repository) GetAvailableTopics(ctx context.Context, userID uuid.UUID, limit int) ([]*topic.TopicCandidate, error) {
 	query := `
-		SELECT id, user_id, title, greeting, context, status, source, created_at, updated_at
+		SELECT id, user_id, title, greeting, context, era_context, status, source, created_at, updated_at
 		FROM topic_candidates
 		WHERE user_id = $1 AND status = 'approved'
 		ORDER BY created_at DESC
@@ -249,6 +253,7 @@ func (r *Repository) GetAvailableTopics(ctx context.Context, userID uuid.UUID, l
 			&t.Title,
 			&t.Greeting,
 			&t.Context,
+			&t.EraContext,
 			&t.Status,
 			&t.Source,
 			&t.CreatedAt,
@@ -266,7 +271,7 @@ func (r *Repository) GetAvailableTopics(ctx context.Context, userID uuid.UUID, l
 // GetPendingTopics 获取待审核话题
 func (r *Repository) GetPendingTopics(ctx context.Context, userID uuid.UUID) ([]*topic.TopicCandidate, error) {
 	query := `
-		SELECT id, user_id, title, greeting, context, status, source, created_at, updated_at
+		SELECT id, user_id, title, greeting, context, era_context, status, source, created_at, updated_at
 		FROM topic_candidates
 		WHERE user_id = $1 AND status = 'pending'
 		ORDER BY created_at DESC
@@ -287,6 +292,7 @@ func (r *Repository) GetPendingTopics(ctx context.Context, userID uuid.UUID) ([]
 			&t.Title,
 			&t.Greeting,
 			&t.Context,
+			&t.EraContext,
 			&t.Status,
 			&t.Source,
 			&t.CreatedAt,
@@ -365,7 +371,7 @@ func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *top
 
 	// 获取列表
 	query := fmt.Sprintf(`
-		SELECT id, user_id, title, greeting, context, status, source, created_at, updated_at
+		SELECT id, user_id, title, greeting, context, era_context, status, source, created_at, updated_at
 		FROM topic_candidates
 		%s
 		ORDER BY created_at DESC
@@ -389,6 +395,7 @@ func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *top
 			&t.Title,
 			&t.Greeting,
 			&t.Context,
+			&t.EraContext,
 			&t.Status,
 			&t.Source,
 			&t.CreatedAt,

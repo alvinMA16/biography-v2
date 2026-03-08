@@ -34,15 +34,16 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, input *topic.Cre
 
 	now := time.Now()
 	t := &topic.TopicCandidate{
-		ID:        uuid.New(),
-		UserID:    userID,
-		Title:     input.Title,
-		Greeting:  nilIfEmpty(input.Greeting),
-		Context:   nilIfEmpty(input.Context),
-		Status:    topic.StatusApproved, // 手动创建的话题直接通过
-		Source:    source,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         uuid.New(),
+		UserID:     userID,
+		Title:      input.Title,
+		Greeting:   nilIfEmpty(input.Greeting),
+		Context:    nilIfEmpty(input.Context),
+		EraContext: nilIfEmpty(input.EraContext),
+		Status:     topic.StatusApproved, // 手动创建的话题直接通过
+		Source:     source,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 
 	if err := s.repo.Create(ctx, t); err != nil {
@@ -58,17 +59,7 @@ func (s *Service) CreateFromGenerated(ctx context.Context, userID uuid.UUID, gen
 	topics := make([]*topic.TopicCandidate, len(generated))
 
 	for i, g := range generated {
-		topics[i] = &topic.TopicCandidate{
-			ID:        uuid.New(),
-			UserID:    userID,
-			Title:     g.Title,
-			Greeting:  nilIfEmpty(g.Greeting),
-			Context:   nilIfEmpty(g.Context),
-			Status:    topic.StatusPending, // AI 生成的话题需要审核
-			Source:    topic.SourceAI,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
+		topics[i] = generatedTopicToCandidate(userID, g, now)
 	}
 
 	if err := s.repo.CreateBatch(ctx, topics); err != nil {
@@ -120,6 +111,9 @@ func (s *Service) Update(ctx context.Context, id, userID uuid.UUID, input *topic
 	if input.Context != nil {
 		t.Context = input.Context
 	}
+	if input.EraContext != nil {
+		t.EraContext = input.EraContext
+	}
 	if input.Status != nil {
 		t.Status = *input.Status
 	}
@@ -167,12 +161,7 @@ func (s *Service) GetTopicOptions(ctx context.Context, userID uuid.UUID, limit i
 
 	options := make([]topic.TopicOption, len(topics))
 	for i, t := range topics {
-		options[i] = topic.TopicOption{
-			ID:       t.ID,
-			Title:    t.Title,
-			Greeting: deref(t.Greeting),
-			Context:  deref(t.Context),
-		}
+		options[i] = candidateToOption(t)
 	}
 
 	return options, nil
@@ -245,6 +234,31 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
+func generatedTopicToCandidate(userID uuid.UUID, generated topic.GeneratedTopic, now time.Time) *topic.TopicCandidate {
+	return &topic.TopicCandidate{
+		ID:         uuid.New(),
+		UserID:     userID,
+		Title:      generated.Title,
+		Greeting:   nilIfEmpty(generated.Greeting),
+		Context:    nilIfEmpty(generated.Context),
+		EraContext: nilIfEmpty(generated.EraContext),
+		Status:     topic.StatusPending,
+		Source:     topic.SourceAI,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+}
+
+func candidateToOption(candidate *topic.TopicCandidate) topic.TopicOption {
+	return topic.TopicOption{
+		ID:         candidate.ID,
+		Title:      candidate.Title,
+		Greeting:   deref(candidate.Greeting),
+		Context:    deref(candidate.Context),
+		EraContext: deref(candidate.EraContext),
+	}
+}
+
 // ============================================
 // Admin 方法
 // ============================================
@@ -274,15 +288,16 @@ func (s *Service) AdminCreate(ctx context.Context, userID uuid.UUID, input *topi
 
 	now := time.Now()
 	t := &topic.TopicCandidate{
-		ID:        uuid.New(),
-		UserID:    userID,
-		Title:     input.Title,
-		Greeting:  nilIfEmpty(input.Greeting),
-		Context:   nilIfEmpty(input.Context),
-		Status:    status,
-		Source:    source,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         uuid.New(),
+		UserID:     userID,
+		Title:      input.Title,
+		Greeting:   nilIfEmpty(input.Greeting),
+		Context:    nilIfEmpty(input.Context),
+		EraContext: nilIfEmpty(input.EraContext),
+		Status:     status,
+		Source:     source,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 
 	if err := s.repo.Create(ctx, t); err != nil {
@@ -307,6 +322,9 @@ func (s *Service) AdminUpdate(ctx context.Context, id uuid.UUID, input *topic.Up
 	}
 	if input.Context != nil {
 		t.Context = input.Context
+	}
+	if input.EraContext != nil {
+		t.EraContext = input.EraContext
 	}
 	if input.Status != nil {
 		t.Status = *input.Status

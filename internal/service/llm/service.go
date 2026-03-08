@@ -105,6 +105,7 @@ type GenerateTopicsInput struct {
 	BirthYear       *int
 	Hometown        string
 	MainCity        string
+	EraMemories     string
 	ExistingTopics  []string
 	ExistingMemoirs []string
 	Count           int
@@ -142,6 +143,7 @@ func (s *Service) GenerateTopics(ctx context.Context, input *GenerateTopicsInput
 		"BirthYear":       birthYear,
 		"Hometown":        input.Hometown,
 		"MainCity":        input.MainCity,
+		"EraMemories":     input.EraMemories,
 		"ExistingTopics":  existingTopics,
 		"ExistingMemoirs": existingMemoirs,
 		"Count":           count,

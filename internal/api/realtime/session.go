@@ -352,12 +352,24 @@ func (s *Session) finishUserTurn() error {
 	}
 
 	s.mu.RLock()
-	messages := make([]llm.Message, len(s.messages))
-	copy(messages, s.messages)
+	allMessages := make([]llm.Message, len(s.messages))
+	copy(allMessages, s.messages)
 	s.mu.RUnlock()
-	log.Printf("[Session] 调用 LLM: provider=%s messages=%d", provider.Name(), len(messages))
+	packet := buildChatContextPacket(s.config, allMessages)
+	systemPrompt := ""
+	if len(allMessages) > 0 && allMessages[0].Role == "system" {
+		systemPrompt = allMessages[0].Content
+	}
+	inferenceMessages := buildInferenceMessages(packet, systemPrompt)
+	log.Printf(
+		"[Session] 调用 LLM: provider=%s raw_messages=%d inference_messages=%d current_turn=%s",
+		provider.Name(),
+		len(allMessages),
+		len(inferenceMessages),
+		formatTurnContextForLog(packet.CurrentUserTurn),
+	)
 
-	resp, err := provider.Chat(s.ctx, messages)
+	resp, err := provider.Chat(s.ctx, inferenceMessages)
 	if err != nil {
 		s.setState(StateListening, "LLM 调用失败")
 		return fmt.Errorf("LLM chat: %w", err)
