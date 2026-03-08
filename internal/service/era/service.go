@@ -114,6 +114,18 @@ func (s *Service) List(ctx context.Context, category *string, page, pageSize int
 	return s.repo.List(ctx, filter)
 }
 
+// ListWithYear 获取时代记忆预设列表（支持年份筛选）
+func (s *Service) ListWithYear(ctx context.Context, category *string, year *int, page, pageSize int) ([]*era.MemoryPreset, int, error) {
+	filter := era.ListMemoryPresetsFilter{
+		Category:  category,
+		YearStart: year, // 筛选包含该年份的记忆（start_year <= year AND end_year >= year）
+		YearEnd:   year,
+		Limit:     pageSize,
+		Offset:    (page - 1) * pageSize,
+	}
+	return s.repo.List(ctx, filter)
+}
+
 // GetByBirthYear 根据出生年份获取相关时代记忆
 func (s *Service) GetByBirthYear(ctx context.Context, birthYear int) ([]*era.MemoryPreset, error) {
 	return s.repo.GetByYearRange(ctx, birthYear)

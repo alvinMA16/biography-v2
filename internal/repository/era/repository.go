@@ -131,16 +131,16 @@ func (r *Repository) List(ctx context.Context, filter era.ListMemoryPresetsFilte
 		argIndex++
 	}
 
-	if filter.YearStart != nil {
-		// 找出覆盖这个年份范围的记忆
+	// 有交集的逻辑：记忆.start_year <= 筛选.end AND 记忆.end_year >= 筛选.start
+	if filter.YearEnd != nil {
 		whereClause += fmt.Sprintf(" AND start_year <= $%d", argIndex)
-		args = append(args, *filter.YearStart)
+		args = append(args, *filter.YearEnd)
 		argIndex++
 	}
 
-	if filter.YearEnd != nil {
+	if filter.YearStart != nil {
 		whereClause += fmt.Sprintf(" AND end_year >= $%d", argIndex)
-		args = append(args, *filter.YearEnd)
+		args = append(args, *filter.YearStart)
 		argIndex++
 	}
 

@@ -411,16 +411,123 @@ function copyPassword() {
 // ========== 时代记忆管理 ==========
 
 let eraMemoriesData = [];
+let eraMemoriesPage = 1;
+let eraMemoriesPageSize = 20;
+let eraMemoriesTotalPages = 1;
+let eraMemoriesTotal = 0;
+let eraMemoriesYearFilter = '';
+let eraMemoriesYearOptions = [];
 
 async function loadEraMemories() {
     try {
-        const resp = await adminRequest('/admin/era-memories');
+        let url = `/admin/era-memories?page=${eraMemoriesPage}&page_size=${eraMemoriesPageSize}`;
+        if (eraMemoriesYearFilter) {
+            url += `&year=${eraMemoriesYearFilter}`;
+        }
+        const resp = await adminRequest(url);
         eraMemoriesData = resp.era_memories || [];
+        eraMemoriesTotal = resp.total || 0;
+        eraMemoriesTotalPages = Math.ceil(eraMemoriesTotal / eraMemoriesPageSize) || 1;
         eraMemoriesLoaded = true;
         renderEraMemoryTable(eraMemoriesData);
+        renderEraMemoryPagination();
+        updateEraMemoryTotalInfo();
+        // 第一次加载时，获取所有年份用于筛选（只执行一次）
+        if (eraMemoriesYearOptions.length === 0) {
+            await loadEraMemoryYearOptions();
+        }
     } catch (e) {
         document.getElementById('eraMemoryTableBody').innerHTML =
             '<tr><td colspan="4" class="admin-table-empty">加载失败</td></tr>';
+    }
+}
+
+async function loadEraMemoryYearOptions() {
+    try {
+        // 获取所有记录来提取年份范围
+        const resp = await adminRequest('/admin/era-memories?page=1&page_size=1000');
+        const memories = resp.era_memories || [];
+        const years = new Set();
+        memories.forEach(m => {
+            for (let y = m.start_year; y <= m.end_year; y++) {
+                years.add(y);
+            }
+        });
+        eraMemoriesYearOptions = Array.from(years).sort((a, b) => a - b);
+        renderEraMemoryYearFilter();
+    } catch (e) {
+        console.error('加载年份选项失败:', e);
+    }
+}
+
+function renderEraMemoryYearFilter() {
+    const select = document.getElementById('eraMemoryYearFilter');
+    if (!select) return;
+
+    // 按年代分组
+    const decades = {};
+    eraMemoriesYearOptions.forEach(y => {
+        const decade = Math.floor(y / 10) * 10;
+        if (!decades[decade]) decades[decade] = [];
+        decades[decade].push(y);
+    });
+
+    let html = '<option value="">全部年份</option>';
+    Object.keys(decades).sort((a, b) => a - b).forEach(decade => {
+        html += `<optgroup label="${decade}年代">`;
+        decades[decade].forEach(y => {
+            html += `<option value="${y}">${y}年</option>`;
+        });
+        html += '</optgroup>';
+    });
+    select.innerHTML = html;
+    select.value = eraMemoriesYearFilter;
+}
+
+function filterEraMemories() {
+    const select = document.getElementById('eraMemoryYearFilter');
+    eraMemoriesYearFilter = select.value;
+    eraMemoriesPage = 1; // 重置到第一页
+    loadEraMemories();
+}
+
+function renderEraMemoryPagination() {
+    const pagination = document.getElementById('eraMemoryPagination');
+    const pageInfo = document.getElementById('eraMemoryPageInfo');
+    const prevBtn = document.getElementById('eraMemoryPrevBtn');
+    const nextBtn = document.getElementById('eraMemoryNextBtn');
+
+    if (!pagination) return;
+
+    if (eraMemoriesTotalPages <= 1) {
+        pagination.style.display = 'none';
+        return;
+    }
+
+    pagination.style.display = 'flex';
+    pageInfo.textContent = `第 ${eraMemoriesPage} / ${eraMemoriesTotalPages} 页`;
+    prevBtn.disabled = eraMemoriesPage <= 1;
+    nextBtn.disabled = eraMemoriesPage >= eraMemoriesTotalPages;
+}
+
+function updateEraMemoryTotalInfo() {
+    const info = document.getElementById('eraMemoryTotalInfo');
+    if (info) {
+        info.textContent = `共 ${eraMemoriesTotal} 条`;
+    }
+}
+
+function eraMemoryPrevPage() {
+    if (eraMemoriesPage > 1) {
+        eraMemoriesPage--;
+        loadEraMemories();
+    }
+}
+
+function eraMemoryNextPage() {
+    if (eraMemoriesPage < eraMemoriesTotalPages) {
+        eraMemoriesPage++;
+        loadEraMemories();
     }
 }
 
@@ -430,9 +537,8 @@ function renderEraMemoryTable(memories) {
         tbody.innerHTML = '<tr><td colspan="4" class="admin-table-empty">暂无时代记忆</td></tr>';
         return;
     }
-    // 按起始年份排序
-    const sorted = [...memories].sort((a, b) => a.start_year - b.start_year);
-    tbody.innerHTML = sorted.map(m => `
+    // 后端已按年份排序，无需前端排序
+    tbody.innerHTML = memories.map(m => `
         <tr>
             <td>${m.start_year}-${m.end_year}</td>
             <td>${m.category || '<span class="text-muted">-</span>'}</td>
@@ -519,7 +625,8 @@ async function saveEraMemory() {
             });
         }
         closeEraMemoryModal();
-        eraMemoriesLoaded = false;
+        // 刷新年份选项（可能新增了年份范围）
+        eraMemoriesYearOptions = [];
         await loadEraMemories();
         logsLoaded = false;
     } catch (e) {
@@ -538,7 +645,8 @@ async function deleteEraMemory(id) {
         await adminRequest(`/admin/era-memories/${id}`, {
             method: 'DELETE',
         });
-        eraMemoriesLoaded = false;
+        // 刷新年份选项（可能删除了某些年份）
+        eraMemoriesYearOptions = [];
         await loadEraMemories();
         logsLoaded = false;
     } catch (e) {

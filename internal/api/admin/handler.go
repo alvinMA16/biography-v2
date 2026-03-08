@@ -1868,7 +1868,14 @@ func (h *Handler) ListEraMemories(c *gin.Context) {
 		category = &cat
 	}
 
-	memories, total, err := h.eraService.List(c.Request.Context(), category, page, pageSize)
+	var year *int
+	if yearStr := c.Query("year"); yearStr != "" {
+		if y, err := strconv.Atoi(yearStr); err == nil {
+			year = &y
+		}
+	}
+
+	memories, total, err := h.eraService.ListWithYear(c.Request.Context(), category, year, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
