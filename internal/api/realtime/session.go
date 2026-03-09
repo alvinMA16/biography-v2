@@ -419,7 +419,7 @@ func ensureFirstSessionClosingText(content string, shouldEnd bool) string {
 	if !shouldEnd || strings.TrimSpace(content) != "" {
 		return strings.TrimSpace(content)
 	}
-	return "今天先聊到这儿，以后咱们再慢慢聊您的人生故事。"
+	return "好的，那我们先聊到这儿，以后咱们再慢慢聊您的人生故事。"
 }
 
 type assistantEnvelope struct {
