@@ -30,8 +30,9 @@ async function handleLogin(event) {
         // 存储 token 和用户信息
         storage.set('token', data.token);
         storage.set('userId', data.user.id);
-        if (previousUserId && previousUserId !== data.user.id) {
-            clearTransientChatState({ includeRecorder: true });
+        if (previousUserId && previousUserId !== data.user.id &&
+            typeof window.clearTransientChatState === 'function') {
+            window.clearTransientChatState({ includeRecorder: true });
         }
 
         // 显示成功提示

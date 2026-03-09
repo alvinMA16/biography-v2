@@ -104,15 +104,16 @@ async function initApp() {
         updateWelcomeText(profile, welcomeMessages);
 
         if (profile.onboarding_completed) {
-            // 用户已完成信息收集，清除临时标记，正常显示主页
+            // 用户已完成首次对话，清除本地临时状态，正常显示主页
             storage.remove('profileJustCompleted');
             return;
         }
 
         // onboarding_completed 还是 false
-        // 检查是否有 profileJustCompleted 标记（说明刚从信息收集对话返回，后台还在处理）
-        if (shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'))) {
-            // 信息收集刚完成，后台正在处理，跳过引导流程
+        // 如果当前用户刚完成首次对话，短时间内先跳过引导，等后台状态同步
+        if (typeof window.shouldSkipOnboardingForRecentlyCompleted === 'function' &&
+            window.shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'))) {
+            // 首次对话刚结束，暂时跳过引导流程
             return;
         }
 
@@ -284,7 +285,9 @@ function toggleDropdown() {
 // 退出登录
 function logout() {
     if (confirm('确定要退出登录吗？')) {
-        clearAuthSessionState({ includeRecorder: true });
+        if (typeof window.clearAuthSessionState === 'function') {
+            window.clearAuthSessionState({ includeRecorder: true });
+        }
         window.location.href = 'login.html';
     }
 }
@@ -302,7 +305,9 @@ async function deleteAccount() {
 
     try {
         await api.user.delete(password);
-        clearAuthSessionState({ includeRecorder: true });
+        if (typeof window.clearAuthSessionState === 'function') {
+            window.clearAuthSessionState({ includeRecorder: true });
+        }
         alert('账号已注销');
         window.location.href = 'login.html';
     } catch (error) {

@@ -76,9 +76,10 @@ window.onload = async function() {
         return;
     }
 
-    // 检查是否是信息收集模式
-    // 注意：如果有 profileJustCompleted 标记，说明信息收集刚完成，不要再进入收集模式
-    if (!shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'))) {
+    // 检查是否是首次对话模式；如果当前用户刚完成首次对话，短时间内不再回到引导模式
+    const shouldSkipOnboarding = typeof window.shouldSkipOnboardingForRecentlyCompleted === 'function'
+        && window.shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'));
+    if (!shouldSkipOnboarding) {
         try {
             const profile = await api.user.getProfile();
             isProfileCollectionMode = !profile.onboarding_completed;
@@ -1040,8 +1041,12 @@ async function endChat() {
 
 // 显示欢迎弹窗（信息收集完成后）
 async function showWelcomeModal() {
-    // 标记“刚完成信息收集”，避免后台提取资料有延迟时反复进入引导
-    markProfileJustCompleted(storage.get('userId'));
+    // 记录当前用户刚完成首次对话，避免返回首页时立刻再次进入引导
+    if (typeof window.markProfileJustCompleted === 'function') {
+        window.markProfileJustCompleted(storage.get('userId'));
+    } else {
+        storage.set('profileJustCompleted', true);
+    }
 
     const modal = document.getElementById('welcomeModal');
     if (modal) {

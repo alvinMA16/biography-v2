@@ -343,3 +343,9 @@ function markProfileJustCompleted(userId) {
         completedAt: Date.now(),
     });
 }
+
+window.clearTransientChatState = clearTransientChatState;
+window.clearAuthSessionState = clearAuthSessionState;
+window.getProfileJustCompletedState = getProfileJustCompletedState;
+window.shouldSkipOnboardingForRecentlyCompleted = shouldSkipOnboardingForRecentlyCompleted;
+window.markProfileJustCompleted = markProfileJustCompleted;
