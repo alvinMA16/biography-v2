@@ -258,19 +258,24 @@ async function createUser() {
     const password = document.getElementById('createPassword').value.trim();
     const nickname = document.getElementById('createNickname').value.trim();
     const gender = document.getElementById('createGender').value;
-    if (!phone || !password || !nickname || !gender) {
-        alert('请填写手机号、密码、姓名和性别');
-        return;
-    }
-
-    const payload = { phone, password, nickname, gender };
-
     const birthYear = document.getElementById('createBirthYear').value.trim();
     const hometown = document.getElementById('createHometown').value.trim();
     const mainCity = document.getElementById('createMainCity').value.trim();
 
-    if (birthYear) payload.birth_year = parseInt(birthYear, 10);
-    if (hometown) payload.hometown = hometown;
+    if (!phone || !password || !nickname || !gender || !birthYear || !hometown) {
+        alert('请填写手机号、密码、姓名、性别、出生年份和家乡');
+        return;
+    }
+
+    const payload = {
+        phone,
+        password,
+        nickname,
+        gender,
+        birth_year: parseInt(birthYear, 10),
+        hometown,
+    };
+
     if (mainCity) payload.main_city = mainCity;
 
     try {

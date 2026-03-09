@@ -960,15 +960,37 @@ function base64ToArrayBuffer(base64) {
 // ========== 页面控制 ==========
 
 // 检测结束标记
+let pendingAutoEnd = false;
+
 function checkEndMarker(text) {
     if (!isProfileCollectionMode || autoEndTriggered) return;
     if (text && text.includes('###END###')) {
         autoEndTriggered = true;
-        DEBUG_MODE && console.log('检测到结束标记 ###END###，自动结束对话');
-        // 延迟一点，让最后的 TTS 播完
+        pendingAutoEnd = true;
+        DEBUG_MODE && console.log('检测到结束标记 ###END###，等待语音播放完毕...');
+        // 开始轮询检查播放是否完成
+        checkAndTriggerAutoEnd();
+    }
+}
+
+// 检查播放是否完成，完成后触发自动结束
+function checkAndTriggerAutoEnd() {
+    if (!pendingAutoEnd) return;
+
+    // 计算剩余播放时间
+    const currentTime = playbackContext ? playbackContext.currentTime : 0;
+    const remainingTime = Math.max(0, nextPlayTime - currentTime);
+
+    if (remainingTime > 0.1 || audioQueue.length > 0 || isAISpeaking) {
+        // 还有音频在播放，继续等待
+        setTimeout(checkAndTriggerAutoEnd, 300);
+    } else {
+        // 播放完毕，等 1.5 秒后触发结束
+        DEBUG_MODE && console.log('语音播放完毕，1.5秒后结束对话');
         setTimeout(() => {
+            pendingAutoEnd = false;
             autoEndProfileCollection();
-        }, 2000);
+        }, 1500);
     }
 }
 
