@@ -186,8 +186,8 @@ func (s *Service) processConversationEnd(conversationID, userID uuid.UUID) {
 		return
 	}
 
-	// 获取对话消息
-	messages, err := s.convService.GetAllMessages(ctx, conversationID)
+	// 等待实时会话把消息落库，避免 end-quick 抢跑。
+	messages, err := s.waitForConversationMessages(ctx, conversationID)
 	if err != nil {
 		log.Printf("[Flow] 获取对话消息失败: %v", err)
 		return
@@ -209,6 +209,50 @@ func (s *Service) processConversationEnd(conversationID, userID uuid.UUID) {
 	s.handleTopicPool(ctx, u)
 
 	log.Printf("[Flow] 对话结束任务完成: %s", conversationID)
+}
+
+func (s *Service) waitForConversationMessages(ctx context.Context, conversationID uuid.UUID) ([]conversation.Message, error) {
+	const (
+		maxWait             = 4 * time.Second
+		pollInterval        = 200 * time.Millisecond
+		stablePollThreshold = 2
+	)
+
+	deadline := time.Now().Add(maxWait)
+	lastCount := -1
+	stablePolls := 0
+
+	for {
+		messages, err := s.convService.GetAllMessages(ctx, conversationID)
+		if err != nil {
+			return nil, err
+		}
+
+		count := len(messages)
+		if count >= 2 {
+			if count == lastCount {
+				stablePolls++
+			} else {
+				stablePolls = 0
+			}
+			if stablePolls >= stablePollThreshold || time.Now().After(deadline) {
+				if stablePolls > 0 {
+					log.Printf("[Flow] 对话消息已稳定: conversation_id=%s messages=%d", conversationID, count)
+				}
+				return messages, nil
+			}
+		}
+
+		if time.Now().After(deadline) {
+			if count < 2 {
+				log.Printf("[Flow] 等待消息落库超时: conversation_id=%s messages=%d", conversationID, count)
+			}
+			return messages, nil
+		}
+
+		lastCount = count
+		time.Sleep(pollInterval)
+	}
 }
 
 // generateSummary 生成对话摘要

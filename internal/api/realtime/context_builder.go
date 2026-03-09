@@ -11,15 +11,15 @@ import (
 )
 
 const (
-	realtimeRecentTurnLimit        = 6
-	longUserTurnThresholdRunes     = 320
-	longTurnSummarySentenceLimit   = 2
-	longTurnFactsLimit             = 5
+	realtimeRecentTurnLimit         = 6
+	longUserTurnThresholdRunes      = 320
+	longTurnSummarySentenceLimit    = 2
+	longTurnFactsLimit              = 5
 	longTurnFollowupCandidatesLimit = 3
-	defaultTopicContextMaxRunes    = 120
-	longTurnFocusMaxRunes          = 120
-	longTurnSummaryMaxRunes        = 90
-	longTurnFactMaxRunes           = 40
+	defaultTopicContextMaxRunes     = 120
+	longTurnFocusMaxRunes           = 120
+	longTurnSummaryMaxRunes         = 90
+	longTurnFactMaxRunes            = 40
 )
 
 var (
@@ -112,19 +112,12 @@ func buildChatContextPacket(config *SessionConfig, messages []llm.Message) ChatC
 
 func buildTurnContext(msg llm.Message) TurnContext {
 	raw := strings.TrimSpace(msg.Content)
-	working := raw
-	compressed := false
-
-	if msg.Role == "user" && utf8.RuneCountInString(raw) > longUserTurnThresholdRunes {
-		working = buildLongTurnWorkingText(raw)
-		compressed = true
-	}
 
 	return TurnContext{
 		Role:         msg.Role,
 		RawText:      raw,
-		WorkingText:  working,
-		IsCompressed: compressed,
+		WorkingText:  raw,
+		IsCompressed: false,
 	}
 }
 

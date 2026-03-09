@@ -370,46 +370,19 @@ func (s *Session) finishUserTurn() error {
 		formatTurnContextForLog(packet.CurrentUserTurn),
 	)
 
-	// 首次对话下使用工具，让模型决定何时结束
-	var resp *llm.Response
-	shouldEndConversation := false
-
-	if s.config.Mode == ModeFirstSession {
-		tools := []llm.Tool{
-			{
-				Type: "function",
-				Function: llm.ToolFunction{
-					Name:        "end_conversation",
-					Description: "当用户明确表示想结束，或首次体验已经完成一小段完整回忆、适合自然收束时，在说完结束语后调用此函数结束会话。",
-					Parameters: map[string]interface{}{
-						"type":       "object",
-						"properties": map[string]interface{}{},
-					},
-				},
-			},
-		}
-		resp, err = provider.ChatWithTools(s.ctx, inferenceMessages, tools)
-		if err == nil && len(resp.ToolCalls) > 0 {
-			for _, tc := range resp.ToolCalls {
-				if tc.Function.Name == "end_conversation" {
-					shouldEndConversation = true
-					s.markFirstSessionCompleted()
-					log.Printf("[Session] 模型调用了 end_conversation 工具")
-					break
-				}
-			}
-		}
-	} else {
-		resp, err = provider.Chat(s.ctx, inferenceMessages)
-	}
+	// 模型通过 JSON 协议返回文本或结束指令
+	resp, err := provider.Chat(s.ctx, inferenceMessages)
 
 	if err != nil {
 		s.setState(StateListening, "LLM 调用失败")
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 
-	assistantText := strings.TrimSpace(resp.Content)
-	assistantText = ensureFirstSessionClosingText(assistantText, shouldEndConversation)
+	assistantText, shouldEndConversation := decodeAssistantEnvelope(resp.Content, s.config.Mode == ModeFirstSession)
+	if shouldEndConversation {
+		s.markFirstSessionCompleted()
+		log.Printf("[Session] 模型返回结束指令")
+	}
 	log.Printf("[Session] LLM 回复完成: len=%d", len(assistantText))
 
 	// 添加助手消息
@@ -447,6 +420,76 @@ func ensureFirstSessionClosingText(content string, shouldEnd bool) string {
 		return strings.TrimSpace(content)
 	}
 	return "今天先聊到这儿，以后咱们再慢慢聊您的人生故事。"
+}
+
+type assistantEnvelope struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+	Tool    string `json:"tool,omitempty"`
+}
+
+func decodeAssistantEnvelope(raw string, allowTool bool) (string, bool) {
+	cleaned := strings.TrimSpace(raw)
+	if cleaned == "" {
+		return "", false
+	}
+
+	jsonText := unwrapJSONCodeFence(cleaned)
+	var envelope assistantEnvelope
+	if err := json.Unmarshal([]byte(jsonText), &envelope); err != nil {
+		log.Printf("[Session] 模型未返回有效 JSON，按普通文本兜底: err=%v", err)
+		return fallbackAssistantText(cleaned), false
+	}
+
+	content := strings.TrimSpace(envelope.Content)
+	msgType := strings.ToLower(strings.TrimSpace(envelope.Type))
+	toolName := strings.ToLower(strings.TrimSpace(envelope.Tool))
+
+	switch msgType {
+	case "text":
+		if content != "" {
+			return content, false
+		}
+	case "tool":
+		if allowTool && toolName == "end_conversation" {
+			return ensureFirstSessionClosingText(content, true), true
+		}
+		if content != "" {
+			log.Printf("[Session] 忽略未授权工具指令: type=%s tool=%s", msgType, toolName)
+			return content, false
+		}
+	}
+
+	log.Printf("[Session] 模型 JSON 缺少有效内容，按兜底文案处理: type=%s tool=%s", msgType, toolName)
+	return fallbackAssistantText(cleaned), false
+}
+
+func unwrapJSONCodeFence(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) == 0 {
+		return trimmed
+	}
+	lines = lines[1:]
+	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "```" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func fallbackAssistantText(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "您接着说，我在听。"
+	}
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		return "您接着说，我在听。"
+	}
+	return trimmed
 }
 
 // buildSystemPrompt 构建系统 prompt
