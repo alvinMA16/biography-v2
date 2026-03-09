@@ -422,13 +422,15 @@ func (s *Session) buildSystemPrompt() (string, error) {
 	}
 
 	data := map[string]interface{}{
-		"UserName":     s.config.UserName,
-		"BirthYear":    birthYear,
-		"Hometown":     s.config.Hometown,
-		"MainCity":     s.config.MainCity,
-		"EraMemories":  s.config.EraMemories,
-		"TopicTitle":   s.config.TopicTitle,
-		"TopicContext": s.config.TopicContext,
+		"UserName":       s.config.UserName,
+		"BirthYear":      birthYear,
+		"Hometown":       s.config.Hometown,
+		"MainCity":       s.config.MainCity,
+		"EraMemories":    s.config.EraMemories,
+		"TopicTitle":     s.config.TopicTitle,
+		"TopicContext":   s.config.TopicContext,
+		"RecorderName":   s.config.RecorderName,
+		"RecorderGender": s.config.RecorderGender,
 	}
 
 	var buf bytes.Buffer
@@ -442,7 +444,11 @@ func (s *Session) buildSystemPrompt() (string, error) {
 // getGreeting 获取开场白
 func (s *Session) getGreeting() string {
 	if s.config.Mode == ModeProfileCollection {
-		return prompt.ProfileCollectionGreeting
+		// 根据记录师性别选择对应的开场白
+		if s.config.RecorderGender == "male" {
+			return prompt.ProfileCollectionGreetingMale
+		}
+		return prompt.ProfileCollectionGreetingFemale
 	}
 	if s.config.TopicGreeting != "" {
 		return s.config.TopicGreeting

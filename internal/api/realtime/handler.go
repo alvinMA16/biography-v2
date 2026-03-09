@@ -104,12 +104,26 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 		}
 	}
 
+	// 获取记录师信息
+	speaker := strings.TrimSpace(c.Query("speaker"))
+	recorderName := strings.TrimSpace(c.Query("recorder_name"))
+	recorderGender := determineRecorderGender(speaker, recorderName)
+	if recorderName == "" {
+		if recorderGender == "female" {
+			recorderName = "忆安"
+		} else {
+			recorderName = "言川"
+		}
+	}
+
 	// 构建会话配置
 	config := &SessionConfig{
 		Mode:           mode,
 		TopicID:        topicID,
 		ConversationID: c.Query("conversation_id"),
-		Speaker:        strings.TrimSpace(c.Query("speaker")),
+		Speaker:        speaker,
+		RecorderName:   recorderName,
+		RecorderGender: recorderGender,
 		UserID:         userID.String(),
 		UserName:       getUserDisplayName(user),
 		BirthYear:      user.BirthYear,
@@ -310,4 +324,26 @@ func deref(s *string) string {
 // HandleDialogFunc 返回一个 gin.HandlerFunc（用于路由注册）
 func HandleDialogFunc(h *Handler) gin.HandlerFunc {
 	return h.HandleDialog
+}
+
+// determineRecorderGender 根据 speaker 音色或 recorder_name 推断记录师性别
+func determineRecorderGender(speaker, recorderName string) string {
+	// 根据名字判断
+	if recorderName == "忆安" || recorderName == "小安" {
+		return "female"
+	}
+	if recorderName == "言川" || recorderName == "小川" {
+		return "male"
+	}
+
+	// 根据 speaker 音色判断（豆包 TTS 音色命名规则）
+	if strings.Contains(speaker, "female") {
+		return "female"
+	}
+	if strings.Contains(speaker, "male") {
+		return "male"
+	}
+
+	// 默认女性
+	return "female"
 }

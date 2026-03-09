@@ -50,6 +50,10 @@ type SessionConfig struct {
 	ConversationID string
 	Speaker        string
 
+	// 记录师信息
+	RecorderName   string // 记录师名字（忆安/言川）
+	RecorderGender string // 记录师性别（female/male）
+
 	// 用户信息（从数据库加载）
 	UserID      string
 	UserName    string
