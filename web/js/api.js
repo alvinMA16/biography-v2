@@ -1,5 +1,6 @@
 // API 配置
 const API_BASE_URL = '/api';
+const PROFILE_JUST_COMPLETED_TTL_MS = 5 * 60 * 1000;
 
 // API 请求封装
 const api = {
@@ -24,8 +25,7 @@ const api = {
             const response = await fetch(url, config);
             if (response.status === 401) {
                 // token 无效或过期，跳转登录页
-                storage.remove('token');
-                storage.remove('userId');
+                clearAuthSessionState({ includeRecorder: true });
                 window.location.href = 'login.html';
                 return;
             }
@@ -268,3 +268,78 @@ const storage = {
         localStorage.removeItem(key);
     },
 };
+
+function clearTransientChatState(options = {}) {
+    const { includeRecorder = false } = options;
+    const keys = [
+        'currentConversationId',
+        'selectedTopic',
+        'selectedTopicGreeting',
+        'selectedTopicContext',
+        'selectedTopicAgeStart',
+        'selectedTopicAgeEnd',
+        'profileJustCompleted',
+    ];
+
+    if (includeRecorder) {
+        keys.push('selectedRecorder');
+    }
+
+    keys.forEach(key => storage.remove(key));
+}
+
+function clearAuthSessionState(options = {}) {
+    clearTransientChatState(options);
+    storage.remove('token');
+    storage.remove('userId');
+}
+
+function getProfileJustCompletedState() {
+    const state = storage.get('profileJustCompleted');
+    if (!state || typeof state !== 'object') {
+        if (state !== null) {
+            storage.remove('profileJustCompleted');
+        }
+        return null;
+    }
+
+    const userId = typeof state.userId === 'string' ? state.userId : '';
+    const completedAt = typeof state.completedAt === 'number' ? state.completedAt : 0;
+    if (!userId || completedAt <= 0) {
+        storage.remove('profileJustCompleted');
+        return null;
+    }
+
+    if (Date.now() - completedAt > PROFILE_JUST_COMPLETED_TTL_MS) {
+        storage.remove('profileJustCompleted');
+        return null;
+    }
+
+    return state;
+}
+
+function shouldSkipOnboardingForRecentlyCompleted(userId) {
+    const state = getProfileJustCompletedState();
+    if (!state) {
+        return false;
+    }
+
+    if (!userId || state.userId !== userId) {
+        storage.remove('profileJustCompleted');
+        return false;
+    }
+
+    return true;
+}
+
+function markProfileJustCompleted(userId) {
+    if (!userId) {
+        storage.remove('profileJustCompleted');
+        return;
+    }
+
+    storage.set('profileJustCompleted', {
+        userId,
+        completedAt: Date.now(),
+    });
+}

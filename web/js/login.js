@@ -25,10 +25,14 @@ async function handleLogin(event) {
 
     try {
         const data = await api.auth.login(phone, password);
+        const previousUserId = storage.get('userId');
 
         // 存储 token 和用户信息
         storage.set('token', data.token);
         storage.set('userId', data.user.id);
+        if (previousUserId && previousUserId !== data.user.id) {
+            clearTransientChatState({ includeRecorder: true });
+        }
 
         // 显示成功提示
         toast.success('登录成功，正在跳转...');

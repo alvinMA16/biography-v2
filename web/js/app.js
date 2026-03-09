@@ -111,7 +111,7 @@ async function initApp() {
 
         // onboarding_completed 还是 false
         // 检查是否有 profileJustCompleted 标记（说明刚从信息收集对话返回，后台还在处理）
-        if (storage.get('profileJustCompleted')) {
+        if (shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'))) {
             // 信息收集刚完成，后台正在处理，跳过引导流程
             return;
         }
@@ -284,11 +284,7 @@ function toggleDropdown() {
 // 退出登录
 function logout() {
     if (confirm('确定要退出登录吗？')) {
-        storage.remove('token');
-        storage.remove('userId');
-        storage.remove('currentConversationId');
-        storage.remove('selectedRecorder');
-        storage.remove('profileJustCompleted');
+        clearAuthSessionState({ includeRecorder: true });
         window.location.href = 'login.html';
     }
 }
@@ -306,10 +302,7 @@ async function deleteAccount() {
 
     try {
         await api.user.delete(password);
-        storage.remove('token');
-        storage.remove('userId');
-        storage.remove('currentConversationId');
-        storage.remove('selectedRecorder');
+        clearAuthSessionState({ includeRecorder: true });
         alert('账号已注销');
         window.location.href = 'login.html';
     } catch (error) {

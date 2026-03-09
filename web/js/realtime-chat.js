@@ -78,7 +78,7 @@ window.onload = async function() {
 
     // 检查是否是信息收集模式
     // 注意：如果有 profileJustCompleted 标记，说明信息收集刚完成，不要再进入收集模式
-    if (!storage.get('profileJustCompleted')) {
+    if (!shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'))) {
         try {
             const profile = await api.user.getProfile();
             isProfileCollectionMode = !profile.onboarding_completed;
@@ -1041,7 +1041,7 @@ async function endChat() {
 // 显示欢迎弹窗（信息收集完成后）
 async function showWelcomeModal() {
     // 标记“刚完成信息收集”，避免后台提取资料有延迟时反复进入引导
-    storage.set('profileJustCompleted', true);
+    markProfileJustCompleted(storage.get('userId'));
 
     const modal = document.getElementById('welcomeModal');
     if (modal) {
