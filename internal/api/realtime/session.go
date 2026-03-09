@@ -124,6 +124,7 @@ func (s *Session) Run() error {
 			}
 			return err
 		}
+		s.conn.SetReadDeadline(time.Now().Add(10 * time.Minute))
 
 		var msg ClientMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
