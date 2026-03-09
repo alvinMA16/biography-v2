@@ -292,12 +292,7 @@ function logout() {
 
 // 注销账号（删除服务器上的所有数据）
 async function deleteAccount() {
-    if (!confirm('确定要注销账号吗？\n\n注销后账号将被停用，数据保留 30 天后将被永久删除。')) {
-        return;
-    }
-
-    // 二次确认
-    if (!confirm('请再次确认：真的要删除所有数据吗？')) {
+    if (!confirm('确定要注销账号吗？\n\n注销后所有数据将被立即删除，且不可恢复。')) {
         return;
     }
 
