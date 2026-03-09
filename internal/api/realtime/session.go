@@ -51,8 +51,9 @@ type Session struct {
 	ttsProvider tts.Provider
 
 	// 对话历史
-	messages []llm.Message
-	mu       sync.RWMutex
+	messages              []llm.Message
+	firstSessionCompleted bool
+	mu                    sync.RWMutex
 
 	// 当前用户输入缓冲（由 ASR 消费协程写入）
 	currentUserText strings.Builder
@@ -369,11 +370,11 @@ func (s *Session) finishUserTurn() error {
 		formatTurnContextForLog(packet.CurrentUserTurn),
 	)
 
-	// 首次对话模式下使用工具，让模型决定何时结束
+	// 首次对话下使用工具，让模型决定何时结束
 	var resp *llm.Response
 	shouldEndConversation := false
 
-	if s.config.Mode == ModeProfileCollection {
+	if s.config.Mode == ModeFirstSession {
 		tools := []llm.Tool{
 			{
 				Type: "function",
@@ -392,6 +393,7 @@ func (s *Session) finishUserTurn() error {
 			for _, tc := range resp.ToolCalls {
 				if tc.Function.Name == "end_conversation" {
 					shouldEndConversation = true
+					s.markFirstSessionCompleted()
 					log.Printf("[Session] 模型调用了 end_conversation 工具")
 					break
 				}
@@ -407,7 +409,7 @@ func (s *Session) finishUserTurn() error {
 	}
 
 	assistantText := strings.TrimSpace(resp.Content)
-	assistantText = ensureProfileCollectionClosingText(assistantText, shouldEndConversation)
+	assistantText = ensureFirstSessionClosingText(assistantText, shouldEndConversation)
 	log.Printf("[Session] LLM 回复完成: len=%d", len(assistantText))
 
 	// 添加助手消息
@@ -432,15 +434,15 @@ func (s *Session) finishUserTurn() error {
 
 	// 如果模型调用了结束工具，发送结束消息给前端
 	if shouldEndConversation {
-		log.Printf("[Session] 发送 profile_collection_complete 给前端")
-		s.sendProfileCollectionComplete()
+		log.Printf("[Session] 发送 first_session_complete 给前端")
+		s.sendFirstSessionComplete()
 	}
 
 	s.setState(StateListening, "本轮完成，继续监听")
 	return nil
 }
 
-func ensureProfileCollectionClosingText(content string, shouldEnd bool) string {
+func ensureFirstSessionClosingText(content string, shouldEnd bool) string {
 	if !shouldEnd || strings.TrimSpace(content) != "" {
 		return strings.TrimSpace(content)
 	}
@@ -450,8 +452,8 @@ func ensureProfileCollectionClosingText(content string, shouldEnd bool) string {
 // buildSystemPrompt 构建系统 prompt
 func (s *Session) buildSystemPrompt() (string, error) {
 	var tmplStr string
-	if s.config.Mode == ModeProfileCollection {
-		tmplStr = prompt.ProfileCollectionSystemPrompt
+	if s.config.Mode == ModeFirstSession {
+		tmplStr = prompt.FirstSessionSystemPrompt
 	} else {
 		tmplStr = prompt.RealtimeChatSystemPrompt
 	}
@@ -488,12 +490,12 @@ func (s *Session) buildSystemPrompt() (string, error) {
 
 // getGreeting 获取开场白
 func (s *Session) getGreeting() string {
-	if s.config.Mode == ModeProfileCollection {
+	if s.config.Mode == ModeFirstSession {
 		// 根据记录师性别选择对应的开场白
 		if s.config.RecorderGender == "male" {
-			return prompt.ProfileCollectionGreetingMale
+			return prompt.FirstSessionGreetingMale
 		}
-		return prompt.ProfileCollectionGreetingFemale
+		return prompt.FirstSessionGreetingFemale
 	}
 	if s.config.TopicGreeting != "" {
 		return s.config.TopicGreeting
@@ -675,10 +677,22 @@ func (s *Session) sendDone() {
 	})
 }
 
-func (s *Session) sendProfileCollectionComplete() {
+func (s *Session) sendFirstSessionComplete() {
 	s.sendJSON(ServerMessage{
-		Type: MsgTypeProfileCollectionComplete,
+		Type: MsgTypeFirstSessionComplete,
 	})
+}
+
+func (s *Session) markFirstSessionCompleted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.firstSessionCompleted = true
+}
+
+func (s *Session) FirstSessionCompleted() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.firstSessionCompleted
 }
 
 func (s *Session) sendError(errMsg string) {

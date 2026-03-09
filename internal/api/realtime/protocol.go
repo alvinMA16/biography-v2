@@ -10,20 +10,20 @@ const (
 	MsgTypeStop  MessageType = "stop"  // 停止对话
 
 	// 服务端 → 客户端
-	MsgTypeASR                       MessageType = "asr"                         // ASR 识别结果
-	MsgTypeResponse                  MessageType = "response"                    // AI 文字回复
-	MsgTypeTTS                       MessageType = "tts"                         // TTS 音频
-	MsgTypeDone                      MessageType = "done"                        // 对话结束
-	MsgTypeError                     MessageType = "error"                       // 错误
-	MsgTypeProfileCollectionComplete MessageType = "profile_collection_complete" // 首次对话完成
+	MsgTypeASR                  MessageType = "asr"                    // ASR 识别结果
+	MsgTypeResponse             MessageType = "response"               // AI 文字回复
+	MsgTypeTTS                  MessageType = "tts"                    // TTS 音频
+	MsgTypeDone                 MessageType = "done"                   // 对话结束
+	MsgTypeError                MessageType = "error"                  // 错误
+	MsgTypeFirstSessionComplete MessageType = "first_session_complete" // 首次对话完成
 )
 
 // Mode 对话模式
 type Mode string
 
 const (
-	ModeNormal            Mode = "normal"             // 正常话题对话
-	ModeProfileCollection Mode = "profile_collection" // 收集用户信息
+	ModeNormal       Mode = "normal"        // 正常话题对话
+	ModeFirstSession Mode = "first_session" // 首次对话
 )
 
 // ClientMessage 客户端消息

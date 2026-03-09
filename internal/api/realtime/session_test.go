@@ -2,8 +2,8 @@ package realtime
 
 import "testing"
 
-func TestEnsureProfileCollectionClosingText(t *testing.T) {
-	text := ensureProfileCollectionClosingText("", true)
+func TestEnsureFirstSessionClosingText(t *testing.T) {
+	text := ensureFirstSessionClosingText("", true)
 	if text == "" {
 		t.Fatal("expected default closing text when conversation should end")
 	}

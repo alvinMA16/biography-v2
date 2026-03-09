@@ -6,7 +6,7 @@ const DEBUG_MODE = window.location.hostname === 'localhost' || window.location.h
 
 
 let conversationId = null;
-let isProfileCollectionMode = false;  // 是否是信息收集模式
+let isFirstSessionMode = false;  // 是否是首次对话
 let autoEndTriggered = false;  // 防止自动结束重复触发
 let recorderName = '记录师';  // 记录师名字，默认值
 
@@ -77,14 +77,14 @@ window.onload = async function() {
     }
 
     // 检查是否是首次对话模式；如果当前用户刚完成首次对话，短时间内不再回到引导模式
-    const shouldSkipOnboarding = typeof window.shouldSkipOnboardingForRecentlyCompleted === 'function'
-        && window.shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'));
+    const shouldSkipOnboarding = typeof window.shouldSkipFirstSessionOnboarding === 'function'
+        && window.shouldSkipFirstSessionOnboarding(storage.get('userId'));
     if (!shouldSkipOnboarding) {
         try {
             const profile = await api.user.getProfile();
-            isProfileCollectionMode = !profile.onboarding_completed;
-            if (isProfileCollectionMode && DEBUG_MODE) {
-                console.log('进入信息收集模式');
+            isFirstSessionMode = !profile.onboarding_completed;
+            if (isFirstSessionMode && DEBUG_MODE) {
+                console.log('进入首次对话');
             }
         } catch (error) {
             console.error('获取用户信息失败:', error);
@@ -162,8 +162,8 @@ async function connectWebSocket() {
         conversation_id: conversationId,
         token: token,
     });
-    if (isProfileCollectionMode) {
-        params.set('mode', 'profile_collection');
+    if (isFirstSessionMode) {
+        params.set('mode', 'first_session');
     }
 
     // 如果有选择的话题，添加到参数中
@@ -309,11 +309,11 @@ function handleServerMessage(message) {
             pendingGreeting = message.content;
             break;
 
-        case 'profile_collection_complete':
+        case 'first_session_complete':
             // 模型调用了结束工具，等 TTS 播完后自动结束对话
-            if (isProfileCollectionMode && !autoEndTriggered) {
+            if (isFirstSessionMode && !autoEndTriggered) {
                 autoEndTriggered = true;
-                DEBUG_MODE && console.log('收到 profile_collection_complete，等待语音播完后结束');
+                DEBUG_MODE && console.log('收到 first_session_complete，等待语音播完后结束');
                 waitForPlaybackAndEnd();
             }
             break;
@@ -967,14 +967,14 @@ function waitForPlaybackAndEnd() {
         // 播放完毕，等 1.5 秒后触发结束
         DEBUG_MODE && console.log('语音播放完毕，1.5秒后结束对话');
         setTimeout(() => {
-            autoEndProfileCollection();
+            autoEndFirstSession();
         }, 1500);
     }
 }
 
-// 自动结束信息收集（由AI触发）
-async function autoEndProfileCollection() {
-    DEBUG_MODE && console.log('自动结束信息收集对话');
+// 自动结束首次对话（由 AI 触发）
+async function autoEndFirstSession() {
+    DEBUG_MODE && console.log('自动结束首次对话');
     conversationEnded = true;
 
     stopRecording();
@@ -1022,11 +1022,11 @@ async function endChat() {
         // 结束对话（后台会处理摘要生成和开场白刷新）
         await api.conversation.endQuick(conversationId);
 
-        if (isProfileCollectionMode) {
-            // 信息收集模式：显示欢迎弹窗
+        if (isFirstSessionMode && autoEndTriggered) {
+            // 首次对话自然收束后，显示欢迎弹窗
             await showWelcomeModal();
         } else {
-            // 正常对话模式：后台异步处理摘要和回忆录
+            // 其余情况直接结束并返回首页
             showToast('对话已保存，可在「我的回忆」中查看');
             setTimeout(() => {
                 navigateHome();
@@ -1039,13 +1039,16 @@ async function endChat() {
     }
 }
 
-// 显示欢迎弹窗（信息收集完成后）
+// 显示欢迎弹窗（首次对话完成后）
 async function showWelcomeModal() {
     // 记录当前用户刚完成首次对话，避免返回首页时立刻再次进入引导
-    if (typeof window.markProfileJustCompleted === 'function') {
-        window.markProfileJustCompleted(storage.get('userId'));
+    if (typeof window.markFirstSessionJustCompleted === 'function') {
+        window.markFirstSessionJustCompleted(storage.get('userId'));
     } else {
-        storage.set('profileJustCompleted', true);
+        storage.set('firstSessionJustCompleted', {
+            userId: storage.get('userId'),
+            completedAt: Date.now(),
+        });
     }
 
     const modal = document.getElementById('welcomeModal');

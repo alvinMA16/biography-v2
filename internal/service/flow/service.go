@@ -199,31 +199,6 @@ func (s *Service) processConversationEnd(conversationID, userID uuid.UUID) {
 		return
 	}
 
-	// 首次对话：只要用户发言超过2轮就标记完成
-	if !u.OnboardingCompleted {
-		userMsgCount := 0
-		for _, msg := range messages {
-			if msg.Role == "user" {
-				userMsgCount++
-			}
-		}
-		if userMsgCount >= 2 {
-			log.Printf("[Flow] 首次对话轮数达标(%d轮)，标记 onboarding 完成: %s", userMsgCount, userID)
-			completed := true
-			_, err := s.userService.AdminUpdate(ctx, userID, &user.AdminUpdateInput{
-				OnboardingCompleted: &completed,
-			})
-			if err != nil {
-				log.Printf("[Flow] 标记 onboarding 完成失败: %v", err)
-			} else {
-				u.OnboardingCompleted = true
-			}
-		} else {
-			log.Printf("[Flow] 首次对话轮数不足(%d轮)，跳过后续处理: %s", userMsgCount, userID)
-			return
-		}
-	}
-
 	// 生成摘要
 	s.generateSummary(ctx, conv, conversationText)
 

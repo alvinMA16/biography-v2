@@ -1,6 +1,7 @@
 // API 配置
 const API_BASE_URL = '/api';
-const PROFILE_JUST_COMPLETED_TTL_MS = 5 * 60 * 1000;
+const FIRST_SESSION_JUST_COMPLETED_TTL_MS = 5 * 60 * 1000;
+const FIRST_SESSION_JUST_COMPLETED_KEY = 'firstSessionJustCompleted';
 
 // API 请求封装
 const api = {
@@ -278,7 +279,7 @@ function clearTransientChatState(options = {}) {
         'selectedTopicContext',
         'selectedTopicAgeStart',
         'selectedTopicAgeEnd',
-        'profileJustCompleted',
+        FIRST_SESSION_JUST_COMPLETED_KEY,
     ];
 
     if (includeRecorder) {
@@ -294,11 +295,15 @@ function clearAuthSessionState(options = {}) {
     storage.remove('userId');
 }
 
-function getProfileJustCompletedState() {
-    const state = storage.get('profileJustCompleted');
+function clearRecentFirstSessionCompletion() {
+    storage.remove(FIRST_SESSION_JUST_COMPLETED_KEY);
+}
+
+function getFirstSessionJustCompletedState() {
+    const state = storage.get(FIRST_SESSION_JUST_COMPLETED_KEY);
     if (!state || typeof state !== 'object') {
         if (state !== null) {
-            storage.remove('profileJustCompleted');
+            clearRecentFirstSessionCompletion();
         }
         return null;
     }
@@ -306,39 +311,39 @@ function getProfileJustCompletedState() {
     const userId = typeof state.userId === 'string' ? state.userId : '';
     const completedAt = typeof state.completedAt === 'number' ? state.completedAt : 0;
     if (!userId || completedAt <= 0) {
-        storage.remove('profileJustCompleted');
+        clearRecentFirstSessionCompletion();
         return null;
     }
 
-    if (Date.now() - completedAt > PROFILE_JUST_COMPLETED_TTL_MS) {
-        storage.remove('profileJustCompleted');
+    if (Date.now() - completedAt > FIRST_SESSION_JUST_COMPLETED_TTL_MS) {
+        clearRecentFirstSessionCompletion();
         return null;
     }
 
     return state;
 }
 
-function shouldSkipOnboardingForRecentlyCompleted(userId) {
-    const state = getProfileJustCompletedState();
+function shouldSkipFirstSessionOnboarding(userId) {
+    const state = getFirstSessionJustCompletedState();
     if (!state) {
         return false;
     }
 
     if (!userId || state.userId !== userId) {
-        storage.remove('profileJustCompleted');
+        clearRecentFirstSessionCompletion();
         return false;
     }
 
     return true;
 }
 
-function markProfileJustCompleted(userId) {
+function markFirstSessionJustCompleted(userId) {
     if (!userId) {
-        storage.remove('profileJustCompleted');
+        clearRecentFirstSessionCompletion();
         return;
     }
 
-    storage.set('profileJustCompleted', {
+    storage.set(FIRST_SESSION_JUST_COMPLETED_KEY, {
         userId,
         completedAt: Date.now(),
     });
@@ -346,6 +351,7 @@ function markProfileJustCompleted(userId) {
 
 window.clearTransientChatState = clearTransientChatState;
 window.clearAuthSessionState = clearAuthSessionState;
-window.getProfileJustCompletedState = getProfileJustCompletedState;
-window.shouldSkipOnboardingForRecentlyCompleted = shouldSkipOnboardingForRecentlyCompleted;
-window.markProfileJustCompleted = markProfileJustCompleted;
+window.clearRecentFirstSessionCompletion = clearRecentFirstSessionCompletion;
+window.getFirstSessionJustCompletedState = getFirstSessionJustCompletedState;
+window.shouldSkipFirstSessionOnboarding = shouldSkipFirstSessionOnboarding;
+window.markFirstSessionJustCompleted = markFirstSessionJustCompleted;

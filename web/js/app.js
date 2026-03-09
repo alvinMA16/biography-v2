@@ -85,7 +85,7 @@ async function initApp() {
     // 确保弹窗初始状态是关闭的
     closeRecorderModal();
 
-    // 检查用户是否存在且完成了信息收集
+    // 检查用户是否已完成首次对话
     try {
         const profile = await api.user.getProfile();
 
@@ -105,19 +105,21 @@ async function initApp() {
 
         if (profile.onboarding_completed) {
             // 用户已完成首次对话，清除本地临时状态，正常显示主页
-            storage.remove('profileJustCompleted');
+            if (typeof window.clearRecentFirstSessionCompletion === 'function') {
+                window.clearRecentFirstSessionCompletion();
+            }
             return;
         }
 
         // onboarding_completed 还是 false
         // 如果当前用户刚完成首次对话，短时间内先跳过引导，等后台状态同步
-        if (typeof window.shouldSkipOnboardingForRecentlyCompleted === 'function' &&
-            window.shouldSkipOnboardingForRecentlyCompleted(storage.get('userId'))) {
+        if (typeof window.shouldSkipFirstSessionOnboarding === 'function' &&
+            window.shouldSkipFirstSessionOnboarding(storage.get('userId'))) {
             // 首次对话刚结束，暂时跳过引导流程
             return;
         }
 
-        // 未完成信息收集，也没有临时标记，启动引导流程
+        // 未完成首次对话，也没有临时标记，启动引导流程
         startOnboarding();
 
     } catch (error) {
@@ -128,7 +130,7 @@ async function initApp() {
 
 // 启动新用户引导流程
 function startOnboarding() {
-    // 显示记录师选择弹窗，确认后进入信息收集对话
+    // 显示记录师选择弹窗，确认后进入首次对话
     const modal = document.getElementById('recorderModal');
     modal.style.display = 'flex';
 
@@ -452,23 +454,23 @@ async function confirmRecorder() {
     stopPreviewAudio();
     closeRecorderModal();
 
-    // 如果是引导模式，进入信息收集对话
+    // 如果是引导模式，进入首次对话
     if (window.onboardingMode) {
         window.onboardingMode = false;
-        await startProfileCollection();
+        await startFirstSession();
     }
 }
 
-// 进入信息收集对话
-async function startProfileCollection() {
+// 进入首次对话
+async function startFirstSession() {
     try {
         // 创建新对话
         const result = await api.conversation.start();
         storage.set('currentConversationId', result.id);
-        // 跳转到对话页面（会自动检测到未完成信息收集）
+        // 跳转到对话页面（会自动检测到未完成首次对话）
         window.location.href = 'chat.html';
     } catch (error) {
-        console.error('开始信息收集失败:', error);
+        console.error('开始首次对话失败:', error);
         alert('开始对话失败: ' + error.message);
     }
 }
@@ -602,7 +604,7 @@ async function loadEraMemories() {
             stopEraMemoriesPolling();
         } else {
             // none - 未收集基础信息
-            contentEl.innerHTML = '<p class="empty-text">请先完成信息收集（出生年份）后再查看</p>';
+            contentEl.innerHTML = '<p class="empty-text">请先完善基础资料后再查看</p>';
             regenerateBtn.disabled = true;
             regenerateBtn.textContent = '重新生成';
             stopEraMemoriesPolling();

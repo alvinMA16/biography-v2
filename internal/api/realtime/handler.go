@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/peizhengma/biography-v2/internal/domain/conversation"
+	userDomain "github.com/peizhengma/biography-v2/internal/domain/user"
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
 	"github.com/peizhengma/biography-v2/internal/provider/tts"
@@ -86,23 +87,16 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 		return
 	}
 
-	// 获取对话模式
-	mode := Mode(c.Query("mode"))
-	topicID := c.Query("topic_id")
-
 	// 加载用户信息
 	user, err := h.userService.GetByID(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取用户信息失败"})
 		return
 	}
-	if mode == "" {
-		if user.OnboardingCompleted {
-			mode = ModeNormal
-		} else {
-			mode = ModeProfileCollection
-		}
-	}
+
+	// 获取对话模式
+	mode := resolveSessionMode(c.Query("mode"), user.OnboardingCompleted)
+	topicID := c.Query("topic_id")
 
 	// 获取记录师信息
 	speaker := strings.TrimSpace(c.Query("speaker"))
@@ -185,8 +179,8 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 
 	log.Printf("[Realtime] 连接关闭: user_id=%s", userID)
 
-	// 保存对话历史（在后台执行）
-	go h.saveConversation(userID, config, session)
+	// 保存对话历史
+	h.saveConversation(userID, config, session)
 }
 
 // HandlePreview 处理记录师音色预览
@@ -219,7 +213,7 @@ func (h *Handler) HandlePreview(c *gin.Context) {
 	})
 }
 
-// saveConversation 保存对话历史并生成回忆录
+// saveConversation 保存对话历史
 func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, session *Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -237,13 +231,6 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 	// 如果没有对话内容，跳过保存
 	if len(userMessages) < 2 {
 		log.Printf("[Realtime] 对话内容不足，跳过保存: user_id=%s", userID)
-		return
-	}
-
-	// Profile collection 模式不保存回忆录
-	if config.Mode == ModeProfileCollection {
-		log.Printf("[Realtime] Profile collection 模式，跳过保存: user_id=%s", userID)
-		// TODO: 可以在这里调用 llm service 提取 profile 并更新用户信息
 		return
 	}
 
@@ -279,7 +266,29 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 		}
 	}
 
+	if config.Mode == ModeFirstSession && session.FirstSessionCompleted() {
+		completed := true
+		if _, err := h.userService.AdminUpdate(ctx, userID, &userDomain.AdminUpdateInput{
+			OnboardingCompleted: &completed,
+		}); err != nil {
+			log.Printf("[Realtime] 标记首次对话完成失败: %v", err)
+		} else {
+			log.Printf("[Realtime] 已标记首次对话完成: user_id=%s", userID)
+		}
+	}
+
 	log.Printf("[Realtime] 对话消息保存成功: conversation_id=%s, messages=%d", convID, len(userMessages))
+}
+
+func resolveSessionMode(raw string, onboardingCompleted bool) Mode {
+	mode := Mode(strings.TrimSpace(raw))
+	if mode == ModeNormal || mode == ModeFirstSession {
+		return mode
+	}
+	if onboardingCompleted {
+		return ModeNormal
+	}
+	return ModeFirstSession
 }
 
 // validateToken 验证 JWT token
