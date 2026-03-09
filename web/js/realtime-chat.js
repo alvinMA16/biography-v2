@@ -249,9 +249,11 @@ function handleServerMessage(message) {
                 // AI 回复文字 - 累积并显示
                 if (isAISpeaking && message.content) {
                     currentAIResponse += message.content;  // 累积文本
-                    // 过滤掉结束标记（兜底，防止偶尔显示）
-                    const displayText = currentAIResponse.replace('【信息收集完成】', '').trim();
+                    // 过滤掉结束标记
+                    const displayText = currentAIResponse.replace('【信息收集完成】', '').replace('###END###', '').trim();
                     updateAIText(displayText);
+                    // 检测结束标记，触发自动结束
+                    checkEndMarker(currentAIResponse);
                 }
             }
             break;
@@ -263,7 +265,11 @@ function handleServerMessage(message) {
 
         case 'response':
             currentAIResponse = message.text || '';
-            updateAIText(currentAIResponse);
+            // 过滤掉结束标记
+            const responseDisplayText = currentAIResponse.replace('###END###', '').trim();
+            updateAIText(responseDisplayText);
+            // 检测结束标记，触发自动结束
+            checkEndMarker(currentAIResponse);
             break;
 
         case 'done':
@@ -952,6 +958,19 @@ function base64ToArrayBuffer(base64) {
 }
 
 // ========== 页面控制 ==========
+
+// 检测结束标记
+function checkEndMarker(text) {
+    if (!isProfileCollectionMode || autoEndTriggered) return;
+    if (text && text.includes('###END###')) {
+        autoEndTriggered = true;
+        DEBUG_MODE && console.log('检测到结束标记 ###END###，自动结束对话');
+        // 延迟一点，让最后的 TTS 播完
+        setTimeout(() => {
+            autoEndProfileCollection();
+        }, 2000);
+    }
+}
 
 // 自动结束信息收集（由AI触发）
 async function autoEndProfileCollection() {
