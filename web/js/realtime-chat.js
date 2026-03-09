@@ -35,6 +35,7 @@ let currentAIResponse = '';  // 累积AI回复文本
 let isAISpeaking = false;    // AI是否正在说话
 let isFirstTTS = true;       // 是否是第一次 TTS（开场白）
 let pendingGreeting = null;  // 后端发来的开场白文本，等 TTS 开始时显示
+let shouldResumeRecording = false; // TTS/播放彻底结束后再恢复录音
 let lastVoiceDetectedAt = 0; // 最近一次检测到人声时间戳
 let sentVoiceSinceLastStop = false;
 let vadTimer = null;
@@ -273,9 +274,8 @@ function handleServerMessage(message) {
             lastVoiceDetectedAt = Date.now();
             setVoiceActive(false);
             updateVoiceStatus('请开始说话');
-            if (!isRecording) {
-                setTimeout(() => startRecording(), 200);
-            }
+            shouldResumeRecording = true;
+            maybeResumeRecordingAfterPlayback();
             break;
 
         case 'error':
@@ -355,9 +355,8 @@ function handleEvent(event, payload) {
                 isFirstTTS = false;
             }
             updateVoiceStatus('请开始说话');
-            setTimeout(() => {
-                startRecording();
-            }, 500);
+            shouldResumeRecording = true;
+            maybeResumeRecordingAfterPlayback();
             break;
 
         case 450:
@@ -692,6 +691,7 @@ function clearAudioQueue() {
 async function playNextAudio() {
     if (audioQueue.length === 0) {
         isPlaying = false;
+        maybeResumeRecordingAfterPlayback();
         return;
     }
 
@@ -736,6 +736,21 @@ async function playNextAudio() {
     }
 
     isPlaying = false;
+    maybeResumeRecordingAfterPlayback();
+}
+
+function maybeResumeRecordingAfterPlayback() {
+    if (!shouldResumeRecording) return;
+    if (isRecording || !isConnected || isAISpeaking || awaitingResponse || isPlaying) return;
+    if (audioQueue.length > 0) return;
+
+    shouldResumeRecording = false;
+    setTimeout(() => {
+        if (shouldResumeRecording || isRecording || !isConnected || isAISpeaking || awaitingResponse || isPlaying || audioQueue.length > 0) {
+            return;
+        }
+        startRecording();
+    }, 200);
 }
 
 // 应用淡入淡出效果减少音频块之间的 click 声
