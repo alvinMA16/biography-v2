@@ -137,6 +137,9 @@ function startOnboarding() {
     // 不默认选中，让用户自己选择
     pendingRecorder = null;
     updateRecorderSelection(null);
+
+    // 预加载音频
+    preloadRecorderAudio();
 }
 
 // 开始新对话 - 先选择话题
@@ -409,6 +412,9 @@ function openRecorderSelect() {
     // 不默认选中，让用户必须手动点击
     pendingRecorder = null;
     updateRecorderSelection(null);
+
+    // 预加载音频
+    preloadRecorderAudio();
 }
 
 // 关闭记录师选择弹窗
@@ -426,13 +432,14 @@ function updateRecorderSelection(gender) {
 // 选择记录师
 let previewAudio = null;
 let pendingRecorder = null;  // 待确认的选择
+let preloadedAudio = {};     // 预加载的音频缓存
 
 async function selectRecorder(gender) {
     pendingRecorder = gender;
     updateRecorderSelection(gender);
 
     // 播放开场白预览
-    await playRecorderGreeting(gender);
+    playRecorderGreeting(gender);
 }
 
 // 确认选择记录师
@@ -468,33 +475,60 @@ async function startProfileCollection() {
     }
 }
 
+// 预加载记录师音频
+async function preloadRecorderAudio() {
+    // 并行预加载两个记录师的音频
+    const genders = ['female', 'male'];
+    await Promise.all(genders.map(async (gender) => {
+        if (preloadedAudio[gender]) return; // 已加载过
+
+        const recorder = RECORDERS[gender];
+        const url = `/api/realtime/preview?speaker=${encodeURIComponent(recorder.speaker)}&text=${encodeURIComponent(recorder.previewGreeting)}`;
+
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                console.error('预加载音频失败:', gender, resp.status);
+                return;
+            }
+            const data = await resp.json();
+            if (!data.audio) {
+                console.error('预加载音频数据为空:', gender);
+                return;
+            }
+            // 缓存 base64 音频数据
+            preloadedAudio[gender] = 'data:audio/mp3;base64,' + data.audio;
+        } catch (error) {
+            console.error('预加载音频失败:', gender, error);
+        }
+    }));
+}
+
 // 播放记录师开场白预览
-async function playRecorderGreeting(gender) {
+function playRecorderGreeting(gender) {
     stopPreviewAudio();
 
+    // 优先使用预加载的音频
+    if (preloadedAudio[gender]) {
+        previewAudio = new Audio(preloadedAudio[gender]);
+        previewAudio.play().catch(err => console.error('播放失败:', err));
+        return;
+    }
+
+    // 兜底：实时加载（预加载失败时）
     const recorder = RECORDERS[gender];
     const url = `/api/realtime/preview?speaker=${encodeURIComponent(recorder.speaker)}&text=${encodeURIComponent(recorder.previewGreeting)}`;
 
-    try {
-        const resp = await fetch(url);
-        if (!resp.ok) {
-            console.error('预览音频失败:', resp.status);
-            return;
-        }
-        const data = await resp.json();
-        if (!data.audio) {
-            console.error('预览音频数据为空');
-            return;
-        }
-
-        // 将 base64 音频转为 data URL 播放
-        const audioSrc = 'data:audio/mp3;base64,' + data.audio;
-        previewAudio = new Audio(audioSrc);
-        previewAudio.play().catch(err => console.error('播放失败:', err));
-
-    } catch (error) {
-        console.error('播放开场白失败:', error);
-    }
+    fetch(url)
+        .then(resp => resp.json())
+        .then(data => {
+            if (!data.audio) return;
+            const audioSrc = 'data:audio/mp3;base64,' + data.audio;
+            preloadedAudio[gender] = audioSrc; // 缓存起来
+            previewAudio = new Audio(audioSrc);
+            previewAudio.play().catch(err => console.error('播放失败:', err));
+        })
+        .catch(err => console.error('播放开场白失败:', err));
 }
 
 function stopPreviewAudio() {
