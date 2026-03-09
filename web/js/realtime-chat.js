@@ -8,6 +8,7 @@ const DEBUG_MODE = window.location.hostname === 'localhost' || window.location.h
 let conversationId = null;
 let isProfileCollectionMode = false;  // 是否是信息收集模式
 let autoEndTriggered = false;  // 防止自动结束重复触发
+let recorderName = '记录师';  // 记录师名字，默认值
 
 // WebSocket 相关
 let ws = null;
@@ -139,6 +140,7 @@ async function connectWebSocket() {
     // 获取选中的记录师
     const selectedRecorder = storage.get('selectedRecorder') || 'female';
     const recorderInfo = RECORDER_INFO[selectedRecorder] || RECORDER_INFO.female;
+    recorderName = recorderInfo.name;  // 保存记录师名字到全局变量
 
     // 获取 token
     const token = storage.get('token');
@@ -236,7 +238,7 @@ function handleServerMessage(message) {
             sentVoiceSinceLastStop = false;
             userSpeechActive = false;
             setVoiceActive(false);
-            updateVoiceStatus('记录师正在说话');
+            updateVoiceStatus(`${recorderName}正在说话`);
             queueAudio(base64ToArrayBuffer(message.data), message.sample_rate || SAMPLE_RATE_OUTPUT);
             break;
 
@@ -279,7 +281,7 @@ function handleServerMessage(message) {
             userSpeechActive = false;
             lastVoiceDetectedAt = Date.now();
             setVoiceActive(false);
-            updateVoiceStatus('请开始说话');
+            updateVoiceStatus('我在听，请您慢慢说');
             shouldResumeRecording = true;
             maybeResumeRecordingAfterPlayback();
             break;
@@ -345,7 +347,7 @@ function handleEvent(event, payload) {
                 updateAIText(pendingGreeting);
                 pendingGreeting = null;
             }
-            updateVoiceStatus('记录师正在说话');
+            updateVoiceStatus(`${recorderName}正在说话`);
             setVoiceActive(false);
             break;
 
@@ -360,7 +362,7 @@ function handleEvent(event, payload) {
             if (isFirstTTS) {
                 isFirstTTS = false;
             }
-            updateVoiceStatus('请开始说话');
+            updateVoiceStatus('我在听，请您慢慢说');
             shouldResumeRecording = true;
             maybeResumeRecordingAfterPlayback();
             break;
@@ -369,13 +371,13 @@ function handleEvent(event, payload) {
             // 用户开始说话 - 清空音频队列，音波动起来
             // 不更新上方文字，保持显示AI之前的问题
             clearAudioQueue();
-            updateVoiceStatus('正在聆听...');
+            updateVoiceStatus('您说，我在听');
             // 音波由本地实时音量驱动，不在这里强制激活
             break;
 
         case 459:
             // 用户说完 - AI 开始处理
-            updateVoiceStatus('正在思考...');
+            updateVoiceStatus('请稍等，我记一下');
             setVoiceActive(false);
             break;
 
@@ -449,7 +451,7 @@ async function startRecording() {
         }
 
         isRecording = true;
-        updateVoiceStatus('请开始说话');
+        updateVoiceStatus('我在听，请您慢慢说');
         setVoiceActive(false);
         lastVoiceDetectedAt = Date.now();
         sentVoiceSinceLastStop = false;
@@ -467,7 +469,7 @@ async function startRecording() {
                     flushPendingPCM(true);
                     awaitingResponse = true;
                     ws.send(JSON.stringify({ type: 'stop' }));
-                    updateVoiceStatus('正在思考...');
+                    updateVoiceStatus('请稍等，我记一下');
                 }
                 sentVoiceSinceLastStop = false;
                 userSpeechActive = false;
@@ -593,7 +595,7 @@ function handleInputChunk(inputData) {
     if (rms >= SPEECH_START_RMS) {
         if (!userSpeechActive) {
             userSpeechActive = true;
-            updateVoiceStatus('正在聆听...');
+            updateVoiceStatus('您说，我在听');
             setVoiceActive(true);
             // 首次触发说话时，把阈值之前的短暂语音一并补发，减少起句丢字
             if (preSpeechPcmBytes.length > 0) {
