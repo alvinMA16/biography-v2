@@ -29,8 +29,8 @@ func New(pool *pgxpool.Pool) *Repository {
 // Create 创建用户
 func (r *Repository) Create(ctx context.Context, u *user.User) error {
 	query := `
-		INSERT INTO users (id, phone, password_hash, nickname, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO users (id, phone, password_hash, nickname, gender, birth_year, hometown, main_city, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -38,6 +38,10 @@ func (r *Repository) Create(ctx context.Context, u *user.User) error {
 		u.Phone,
 		u.PasswordHash,
 		u.Nickname,
+		u.Gender,
+		u.BirthYear,
+		u.Hometown,
+		u.MainCity,
 		u.CreatedAt,
 		u.UpdatedAt,
 	)
