@@ -80,7 +80,7 @@ window.onload = async function() {
     if (!storage.get('profileJustCompleted')) {
         try {
             const profile = await api.user.getProfile();
-            isProfileCollectionMode = !profile.profile_completed;
+            isProfileCollectionMode = !profile.onboarding_completed;
             if (isProfileCollectionMode && DEBUG_MODE) {
                 console.log('进入信息收集模式');
             }

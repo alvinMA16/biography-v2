@@ -117,7 +117,7 @@ func (s *Service) EndConversation(ctx context.Context, conversationID, userID uu
 	}
 
 	// 资料未完整时，先结束对话，不做 AI 自动资料写回。
-	if !u.ProfileCompleted {
+	if !u.OnboardingCompleted {
 		log.Printf("[Flow] 用户资料未完整，跳过自动资料写回: %s", userID)
 		result.Message = "对话已结束，用户资料待人工完善"
 	} else {
@@ -199,7 +199,7 @@ func (s *Service) processConversationEnd(conversationID, userID uuid.UUID) {
 		return
 	}
 
-	if !u.ProfileCompleted {
+	if !u.OnboardingCompleted {
 		log.Printf("[Flow] 用户资料未完整，跳过自动资料写回: %s", userID)
 	} else {
 		// 生成摘要

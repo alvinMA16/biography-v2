@@ -179,7 +179,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID uuid.UUID, input *us
 	}
 
 	// 检查是否完成资料填写
-	u.ProfileCompleted = isProfileCompleted(u)
+	u.OnboardingCompleted = isOnboardingCompleted(u)
 
 	// 保存更新
 	if err := s.repo.Update(ctx, u); err != nil {
@@ -294,7 +294,7 @@ func (s *Service) AdminCreate(ctx context.Context, input *user.AdminCreateInput)
 	}
 
 	// 检查是否完成资料填写
-	u.ProfileCompleted = isProfileCompleted(u)
+	u.OnboardingCompleted = isOnboardingCompleted(u)
 
 	if err := s.repo.Create(ctx, u); err != nil {
 		if errors.Is(err, userRepo.ErrAlreadyExists) {
@@ -334,14 +334,14 @@ func (s *Service) AdminUpdate(ctx context.Context, userID uuid.UUID, input *user
 	if input.MainCity != nil {
 		u.MainCity = input.MainCity
 	}
-	if input.ProfileCompleted != nil {
-		u.ProfileCompleted = *input.ProfileCompleted
+	if input.OnboardingCompleted != nil {
+		u.OnboardingCompleted = *input.OnboardingCompleted
 	}
 	if input.IsActive != nil {
 		u.IsActive = *input.IsActive
 	}
 
-	u.ProfileCompleted = isProfileCompleted(u)
+	u.OnboardingCompleted = isOnboardingCompleted(u)
 
 	if err := s.repo.Update(ctx, u); err != nil {
 		return nil, err
@@ -420,8 +420,8 @@ func isValidPhone(phone string) bool {
 	return matched
 }
 
-// isProfileCompleted 检查用户资料是否完整
-func isProfileCompleted(u *user.User) bool {
+// isOnboardingCompleted 检查用户资料是否完整
+func isOnboardingCompleted(u *user.User) bool {
 	return u.Nickname != nil && *u.Nickname != "" &&
 		u.BirthYear != nil &&
 		u.Hometown != nil && *u.Hometown != ""

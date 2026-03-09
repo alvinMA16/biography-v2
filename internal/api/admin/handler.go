@@ -184,7 +184,7 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		BirthYear        *int    `json:"birth_year"`
 		Hometown         *string `json:"hometown"`
 		MainCity         *string `json:"main_city"`
-		ProfileCompleted *bool   `json:"profile_completed"`
+		OnboardingCompleted *bool   `json:"onboarding_completed"`
 		IsActive         *bool   `json:"is_active"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -199,7 +199,7 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		BirthYear:        input.BirthYear,
 		Hometown:         input.Hometown,
 		MainCity:         input.MainCity,
-		ProfileCompleted: input.ProfileCompleted,
+		OnboardingCompleted: input.OnboardingCompleted,
 		IsActive:         input.IsActive,
 	})
 	if err != nil {
@@ -422,7 +422,7 @@ func (h *Handler) GetUserStats(c *gin.Context) {
 		"birth_year":        u.BirthYear,
 		"hometown":          u.Hometown,
 		"main_city":         u.MainCity,
-		"profile_completed": u.ProfileCompleted,
+		"onboarding_completed": u.OnboardingCompleted,
 		"is_active":         u.IsActive,
 		"era_memories":      u.EraMemories,
 		"created_at":        u.CreatedAt,
@@ -1568,14 +1568,14 @@ func (h *Handler) GetStats(c *gin.Context) {
 	// 获取用户统计
 	users, totalUsers, _ := h.userService.AdminList(ctx, 10000, 0)
 
-	// 计算资料完成率
-	profileCompleted := 0
+	// 计算首次对话完成率
+	onboardingCompleted := 0
 	birthDecadeMap := make(map[string]int)
 	hometownMap := make(map[string]int)
 
 	for _, u := range users {
-		if u.ProfileCompleted {
-			profileCompleted++
+		if u.OnboardingCompleted {
+			onboardingCompleted++
 		}
 		// 出生年代分布
 		if u.BirthYear != nil && *u.BirthYear > 0 {
@@ -1592,9 +1592,9 @@ func (h *Handler) GetStats(c *gin.Context) {
 		}
 	}
 
-	profileRate := 0.0
+	onboardingRate := 0.0
 	if totalUsers > 0 {
-		profileRate = float64(profileCompleted) / float64(totalUsers)
+		onboardingRate = float64(onboardingCompleted) / float64(totalUsers)
 	}
 
 	// 获取对话统计
@@ -1721,10 +1721,10 @@ func (h *Handler) GetStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"overview": gin.H{
-			"total_users":             totalUsers,
-			"profile_completion_rate": profileRate,
-			"total_conversations":     totalConversations,
-			"total_memoirs":           totalMemoirs,
+			"total_users":                totalUsers,
+			"onboarding_completion_rate": onboardingRate,
+			"total_conversations":        totalConversations,
+			"total_memoirs":              totalMemoirs,
 		},
 		"activity": gin.H{
 			"today_active_users":      len(todayActiveUsers),

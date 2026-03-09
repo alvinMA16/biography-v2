@@ -151,7 +151,7 @@ function renderUserTable(users) {
             <td>${u.phone || '-'}</td>
             <td>${u.nickname || '<span class="text-muted">-</span>'}</td>
             <td>${u.birth_year || '<span class="text-muted">-</span>'}</td>
-            <td><span class="admin-badge ${u.profile_completed ? 'badge-yes' : 'badge-no'}">${u.profile_completed ? '已完成' : '未开始'}</span></td>
+            <td><span class="admin-badge ${u.onboarding_completed ? 'badge-yes' : 'badge-no'}">${u.onboarding_completed ? '已完成' : '未开始'}</span></td>
             <td><span class="admin-badge ${isActive ? 'badge-yes' : 'badge-no'}">${isActive ? '正常' : '已禁用'}</span></td>
             <td>${u.conversation_count ?? 0} / ${u.memoir_count ?? 0}</td>
             <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('zh-CN') : '-'}</td>
@@ -812,7 +812,7 @@ function refreshMonitoring() {
 function renderMonitoringData(data) {
     // 核心指标
     document.getElementById('statTotalUsers').textContent = data.overview.total_users;
-    document.getElementById('statProfileRate').textContent = `${(data.overview.profile_completion_rate * 100).toFixed(0)}%`;
+    document.getElementById('statProfileRate').textContent = `${(data.overview.onboarding_completion_rate * 100).toFixed(0)}%`;
     document.getElementById('statTotalConversations').textContent = data.overview.total_conversations;
     document.getElementById('statTotalMemoirs').textContent = data.overview.total_memoirs;
     document.getElementById('statTodayActive').textContent = data.activity.today_active_users;
@@ -1269,8 +1269,8 @@ function renderUserDetail(detail) {
     // 状态徽章
     document.getElementById('detailStatusBadge').className = `admin-badge ${detail.is_active ? 'badge-yes' : 'badge-no'}`;
     document.getElementById('detailStatusBadge').textContent = detail.is_active ? '正常' : '已禁用';
-    document.getElementById('detailProfileBadge').className = `admin-badge ${detail.profile_completed ? 'badge-yes' : 'badge-no'}`;
-    document.getElementById('detailProfileBadge').textContent = detail.profile_completed ? '首次对话已完成' : '首次对话未开始';
+    document.getElementById('detailProfileBadge').className = `admin-badge ${detail.onboarding_completed ? 'badge-yes' : 'badge-no'}`;
+    document.getElementById('detailProfileBadge').textContent = detail.onboarding_completed ? '首次对话已完成' : '首次对话未开始';
 
     // 统计数据
     document.getElementById('detailConvCount').textContent = detail.conversations ? detail.conversations.length : 0;

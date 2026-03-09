@@ -97,7 +97,7 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 		return
 	}
 	if mode == "" {
-		if user.ProfileCompleted {
+		if user.OnboardingCompleted {
 			mode = ModeNormal
 		} else {
 			mode = ModeProfileCollection

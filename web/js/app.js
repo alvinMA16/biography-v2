@@ -103,13 +103,13 @@ async function initApp() {
         // 更新欢迎语
         updateWelcomeText(profile, welcomeMessages);
 
-        if (profile.profile_completed) {
+        if (profile.onboarding_completed) {
             // 用户已完成信息收集，清除临时标记，正常显示主页
             storage.remove('profileJustCompleted');
             return;
         }
 
-        // profile_completed 还是 false
+        // onboarding_completed 还是 false
         // 检查是否有 profileJustCompleted 标记（说明刚从信息收集对话返回，后台还在处理）
         if (storage.get('profileJustCompleted')) {
             // 信息收集刚完成，后台正在处理，跳过引导流程

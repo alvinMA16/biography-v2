@@ -21,7 +21,7 @@ type User struct {
 	MainCity      *string `json:"main_city" db:"main_city"`
 
 	// 状态
-	ProfileCompleted  bool    `json:"profile_completed" db:"profile_completed"` // 人工资料是否已完整
+	OnboardingCompleted bool    `json:"onboarding_completed" db:"onboarding_completed"` // 首次对话是否完成
 	EraMemories       *string `json:"era_memories" db:"era_memories"`
 	EraMemoriesStatus string  `json:"era_memories_status" db:"era_memories_status"` // none/pending/generating/completed/failed
 	IsAdmin           bool    `json:"is_admin" db:"is_admin"`
@@ -78,14 +78,14 @@ type AuthResponse struct {
 
 // AdminUpdateInput 管理员更新用户输入
 type AdminUpdateInput struct {
-	Nickname         *string `json:"nickname"`
-	PreferredName    *string `json:"preferred_name"`
-	Gender           *string `json:"gender"`
-	BirthYear        *int    `json:"birth_year"`
-	Hometown         *string `json:"hometown"`
-	MainCity         *string `json:"main_city"`
-	ProfileCompleted *bool   `json:"profile_completed"`
-	IsActive         *bool   `json:"is_active"`
+	Nickname            *string `json:"nickname"`
+	PreferredName       *string `json:"preferred_name"`
+	Gender              *string `json:"gender"`
+	BirthYear           *int    `json:"birth_year"`
+	Hometown            *string `json:"hometown"`
+	MainCity            *string `json:"main_city"`
+	OnboardingCompleted *bool   `json:"onboarding_completed"`
+	IsActive            *bool   `json:"is_active"`
 }
 
 // EraMemoriesStatus 时代记忆状态常量

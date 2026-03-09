@@ -57,7 +57,7 @@ func (r *Repository) Create(ctx context.Context, u *user.User) error {
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, error) {
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
-		       birth_year, hometown, main_city, profile_completed, era_memories,
+		       birth_year, hometown, main_city, onboarding_completed, era_memories,
 		       era_memories_status, is_admin, is_active, settings,
 		       created_at, updated_at, deleted_at
 		FROM users
@@ -75,7 +75,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, err
 		&u.BirthYear,
 		&u.Hometown,
 		&u.MainCity,
-		&u.ProfileCompleted,
+		&u.OnboardingCompleted,
 		&u.EraMemories,
 		&u.EraMemoriesStatus,
 		&u.IsAdmin,
@@ -100,7 +100,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, err
 func (r *Repository) GetByPhone(ctx context.Context, phone string) (*user.User, error) {
 	query := `
 		SELECT id, phone, password_hash, nickname, preferred_name, gender,
-		       birth_year, hometown, main_city, profile_completed, era_memories,
+		       birth_year, hometown, main_city, onboarding_completed, era_memories,
 		       era_memories_status, is_admin, is_active, settings,
 		       created_at, updated_at, deleted_at
 		FROM users
@@ -118,7 +118,7 @@ func (r *Repository) GetByPhone(ctx context.Context, phone string) (*user.User, 
 		&u.BirthYear,
 		&u.Hometown,
 		&u.MainCity,
-		&u.ProfileCompleted,
+		&u.OnboardingCompleted,
 		&u.EraMemories,
 		&u.EraMemoriesStatus,
 		&u.IsAdmin,
@@ -144,7 +144,7 @@ func (r *Repository) Update(ctx context.Context, u *user.User) error {
 	query := `
 		UPDATE users
 		SET nickname = $2, preferred_name = $3, gender = $4, birth_year = $5,
-		    hometown = $6, main_city = $7, profile_completed = $8, era_memories = $9,
+		    hometown = $6, main_city = $7, onboarding_completed = $8, era_memories = $9,
 		    era_memories_status = $10, is_active = $11, settings = $12, updated_at = $13
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -157,7 +157,7 @@ func (r *Repository) Update(ctx context.Context, u *user.User) error {
 		u.BirthYear,
 		u.Hometown,
 		u.MainCity,
-		u.ProfileCompleted,
+		u.OnboardingCompleted,
 		u.EraMemories,
 		u.EraMemoriesStatus,
 		u.IsActive,
@@ -276,7 +276,7 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.UserW
 	// 获取列表（含对话数和回忆录数）
 	query := `
 		SELECT u.id, u.phone, u.password_hash, u.nickname, u.preferred_name, u.gender,
-		       u.birth_year, u.hometown, u.main_city, u.profile_completed, u.era_memories,
+		       u.birth_year, u.hometown, u.main_city, u.onboarding_completed, u.era_memories,
 		       u.era_memories_status, u.is_admin, u.is_active, u.settings,
 		       u.created_at, u.updated_at, u.deleted_at,
 		       COALESCE(c.cnt, 0) AS conversation_count,
@@ -308,7 +308,7 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]*user.UserW
 			&u.BirthYear,
 			&u.Hometown,
 			&u.MainCity,
-			&u.ProfileCompleted,
+			&u.OnboardingCompleted,
 			&u.EraMemories,
 			&u.EraMemoriesStatus,
 			&u.IsAdmin,
