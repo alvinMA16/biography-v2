@@ -378,10 +378,14 @@ func (s *Session) finishUserTurn() error {
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 
-	assistantText, shouldEndConversation := decodeAssistantEnvelope(resp.Content, s.config.Mode == ModeFirstSession)
-	if shouldEndConversation {
-		s.markFirstSessionCompleted()
-		log.Printf("[Session] 模型返回结束指令")
+	assistantText := strings.TrimSpace(resp.Content)
+	shouldEndConversation := false
+	if s.config.Mode == ModeFirstSession {
+		assistantText, shouldEndConversation = decodeAssistantEnvelope(resp.Content, true)
+		if shouldEndConversation {
+			s.markFirstSessionCompleted()
+			log.Printf("[Session] 模型返回结束指令")
+		}
 	}
 	log.Printf("[Session] LLM 回复完成: len=%d", len(assistantText))
 
