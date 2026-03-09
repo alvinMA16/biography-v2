@@ -251,11 +251,7 @@ function handleServerMessage(message) {
                 // AI 回复文字 - 累积并显示
                 if (isAISpeaking && message.content) {
                     currentAIResponse += message.content;  // 累积文本
-                    // 过滤掉结束标记
-                    const displayText = currentAIResponse.replace('【信息收集完成】', '').replace('###END###', '').trim();
-                    updateAIText(displayText);
-                    // 检测结束标记，触发自动结束
-                    checkEndMarker(currentAIResponse);
+                    updateAIText(currentAIResponse);
                 }
             }
             break;
@@ -267,11 +263,7 @@ function handleServerMessage(message) {
 
         case 'response':
             currentAIResponse = message.text || '';
-            // 过滤掉结束标记
-            const responseDisplayText = currentAIResponse.replace('###END###', '').trim();
-            updateAIText(responseDisplayText);
-            // 检测结束标记，触发自动结束
-            checkEndMarker(currentAIResponse);
+            updateAIText(currentAIResponse);
             break;
 
         case 'done':
@@ -317,11 +309,11 @@ function handleServerMessage(message) {
             break;
 
         case 'profile_collection_complete':
-            // 后端 Qwen 验证信息收集完成，自动结束对话
+            // 模型调用了结束工具，等 TTS 播完后自动结束对话
             if (isProfileCollectionMode && !autoEndTriggered) {
                 autoEndTriggered = true;
-                DEBUG_MODE && console.log('收到后端信息收集完成确认，自动结束对话');
-                autoEndProfileCollection();
+                DEBUG_MODE && console.log('收到 profile_collection_complete，等待语音播完后结束');
+                waitForPlaybackAndEnd();
             }
             break;
 
@@ -961,36 +953,19 @@ function base64ToArrayBuffer(base64) {
 
 // ========== 页面控制 ==========
 
-// 检测结束标记
-let pendingAutoEnd = false;
-
-function checkEndMarker(text) {
-    if (!isProfileCollectionMode || autoEndTriggered) return;
-    if (text && text.includes('###END###')) {
-        autoEndTriggered = true;
-        pendingAutoEnd = true;
-        DEBUG_MODE && console.log('检测到结束标记 ###END###，等待语音播放完毕...');
-        // 开始轮询检查播放是否完成
-        checkAndTriggerAutoEnd();
-    }
-}
-
-// 检查播放是否完成，完成后触发自动结束
-function checkAndTriggerAutoEnd() {
-    if (!pendingAutoEnd) return;
-
+// 等待语音播放完毕后结束对话
+function waitForPlaybackAndEnd() {
     // 计算剩余播放时间
     const currentTime = playbackContext ? playbackContext.currentTime : 0;
     const remainingTime = Math.max(0, nextPlayTime - currentTime);
 
     if (remainingTime > 0.1 || audioQueue.length > 0 || isAISpeaking) {
         // 还有音频在播放，继续等待
-        setTimeout(checkAndTriggerAutoEnd, 300);
+        setTimeout(waitForPlaybackAndEnd, 300);
     } else {
         // 播放完毕，等 1.5 秒后触发结束
         DEBUG_MODE && console.log('语音播放完毕，1.5秒后结束对话');
         setTimeout(() => {
-            pendingAutoEnd = false;
             autoEndProfileCollection();
         }, 1500);
     }

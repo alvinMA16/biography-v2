@@ -215,6 +215,12 @@ func (p *Provider) Chat(ctx context.Context, messages []llm.Message) (*llm.Respo
 	}, nil
 }
 
+// ChatWithTools 带工具的同步对话（Gemini 暂不支持，回退到普通 Chat）
+func (p *Provider) ChatWithTools(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
+	// Gemini 暂不实现 tools，直接调用普通 Chat
+	return p.Chat(ctx, messages)
+}
+
 // ChatStream 流式对话
 func (p *Provider) ChatStream(ctx context.Context, messages []llm.Message) (<-chan llm.Chunk, error) {
 	model := p.client.GenerativeModel(p.model)

@@ -109,6 +109,7 @@ func (p *Provider) RawGenerate(ctx context.Context, prompt string) (string, stri
 type chatRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
+	Tools    []llm.Tool    `json:"tools,omitempty"`
 	Stream   bool          `json:"stream,omitempty"`
 }
 
@@ -117,13 +118,20 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+// chatResponseMessage 响应消息（包含 tool_calls）
+type chatResponseMessage struct {
+	Role      string         `json:"role"`
+	Content   string         `json:"content"`
+	ToolCalls []llm.ToolCall `json:"tool_calls,omitempty"`
+}
+
 // chatResponse OpenAI 兼容的响应格式
 type chatResponse struct {
 	ID      string `json:"id"`
 	Choices []struct {
-		Index        int `json:"index"`
-		Message      chatMessage
-		FinishReason string `json:"finish_reason"`
+		Index        int                 `json:"index"`
+		Message      chatResponseMessage `json:"message"`
+		FinishReason string              `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -198,6 +206,65 @@ func (p *Provider) Chat(ctx context.Context, messages []llm.Message) (*llm.Respo
 		Content:      chatResp.Choices[0].Message.Content,
 		FinishReason: chatResp.Choices[0].FinishReason,
 		TokensUsed:   chatResp.Usage.TotalTokens,
+		ToolCalls:    chatResp.Choices[0].Message.ToolCalls,
+	}, nil
+}
+
+// ChatWithTools 带工具的同步对话
+func (p *Provider) ChatWithTools(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
+	chatMessages := make([]chatMessage, len(messages))
+	for i, msg := range messages {
+		chatMessages[i] = chatMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		}
+	}
+
+	reqBody := chatRequest{
+		Model:    p.model,
+		Messages: chatMessages,
+		Tools:    tools,
+		Stream:   false,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("dashscope: failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("dashscope: failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("dashscope: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("dashscope: API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var chatResp chatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		return nil, fmt.Errorf("dashscope: failed to decode response: %w", err)
+	}
+
+	if len(chatResp.Choices) == 0 {
+		return nil, errors.New("dashscope: no choices in response")
+	}
+
+	return &llm.Response{
+		Content:      chatResp.Choices[0].Message.Content,
+		FinishReason: chatResp.Choices[0].FinishReason,
+		TokensUsed:   chatResp.Usage.TotalTokens,
+		ToolCalls:    chatResp.Choices[0].Message.ToolCalls,
 	}, nil
 }
 

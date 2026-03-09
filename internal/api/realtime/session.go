@@ -369,7 +369,38 @@ func (s *Session) finishUserTurn() error {
 		formatTurnContextForLog(packet.CurrentUserTurn),
 	)
 
-	resp, err := provider.Chat(s.ctx, inferenceMessages)
+	// 首次对话模式下使用工具，让模型决定何时结束
+	var resp *llm.Response
+	shouldEndConversation := false
+
+	if s.config.Mode == ModeProfileCollection {
+		tools := []llm.Tool{
+			{
+				Type: "function",
+				Function: llm.ToolFunction{
+					Name:        "end_conversation",
+					Description: "当你觉得已经了解了用户的基本信息（家乡、出生年代等），可以结束这次对话时，调用此函数。调用前请先说一句自然的结束语。",
+					Parameters: map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
+					},
+				},
+			},
+		}
+		resp, err = provider.ChatWithTools(s.ctx, inferenceMessages, tools)
+		if err == nil && len(resp.ToolCalls) > 0 {
+			for _, tc := range resp.ToolCalls {
+				if tc.Function.Name == "end_conversation" {
+					shouldEndConversation = true
+					log.Printf("[Session] 模型调用了 end_conversation 工具")
+					break
+				}
+			}
+		}
+	} else {
+		resp, err = provider.Chat(s.ctx, inferenceMessages)
+	}
+
 	if err != nil {
 		s.setState(StateListening, "LLM 调用失败")
 		return fmt.Errorf("LLM chat: %w", err)
@@ -397,6 +428,12 @@ func (s *Session) finishUserTurn() error {
 
 	// 发送完成信号
 	s.sendDone()
+
+	// 如果模型调用了结束工具，发送结束消息给前端
+	if shouldEndConversation {
+		log.Printf("[Session] 发送 profile_collection_complete 给前端")
+		s.sendProfileCollectionComplete()
+	}
 
 	s.setState(StateListening, "本轮完成，继续监听")
 	return nil
@@ -627,6 +664,12 @@ func (s *Session) sendDone() {
 	log.Printf("[Session] 向前端发送 done")
 	s.sendJSON(ServerMessage{
 		Type: MsgTypeDone,
+	})
+}
+
+func (s *Session) sendProfileCollectionComplete() {
+	s.sendJSON(ServerMessage{
+		Type: MsgTypeProfileCollectionComplete,
 	})
 }
 
