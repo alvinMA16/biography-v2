@@ -379,7 +379,7 @@ func (s *Session) finishUserTurn() error {
 				Type: "function",
 				Function: llm.ToolFunction{
 					Name:        "end_conversation",
-					Description: "当你觉得已经了解了用户的基本信息（家乡、出生年代等），可以结束这次对话时，调用此函数。调用前请先说一句自然的结束语。",
+					Description: "当你想结束这次对话时，在说完结束语后调用此函数结束会话。",
 					Parameters: map[string]interface{}{
 						"type":       "object",
 						"properties": map[string]interface{}{},
@@ -407,6 +407,7 @@ func (s *Session) finishUserTurn() error {
 	}
 
 	assistantText := strings.TrimSpace(resp.Content)
+	assistantText = ensureProfileCollectionClosingText(assistantText, shouldEndConversation)
 	log.Printf("[Session] LLM 回复完成: len=%d", len(assistantText))
 
 	// 添加助手消息
@@ -437,6 +438,13 @@ func (s *Session) finishUserTurn() error {
 
 	s.setState(StateListening, "本轮完成，继续监听")
 	return nil
+}
+
+func ensureProfileCollectionClosingText(content string, shouldEnd bool) string {
+	if !shouldEnd || strings.TrimSpace(content) != "" {
+		return strings.TrimSpace(content)
+	}
+	return "今天先聊到这儿，以后咱们再慢慢聊您的人生故事。"
 }
 
 // buildSystemPrompt 构建系统 prompt
