@@ -178,9 +178,6 @@ func (s *Service) UpdateProfile(ctx context.Context, userID uuid.UUID, input *us
 		u.MainCity = input.MainCity
 	}
 
-	// 检查是否完成资料填写
-	u.OnboardingCompleted = isOnboardingCompleted(u)
-
 	// 保存更新
 	if err := s.repo.Update(ctx, u); err != nil {
 		return nil, err
@@ -293,9 +290,6 @@ func (s *Service) AdminCreate(ctx context.Context, input *user.AdminCreateInput)
 		UpdatedAt:    now,
 	}
 
-	// 检查是否完成资料填写
-	u.OnboardingCompleted = isOnboardingCompleted(u)
-
 	if err := s.repo.Create(ctx, u); err != nil {
 		if errors.Is(err, userRepo.ErrAlreadyExists) {
 			return nil, ErrPhoneAlreadyExists
@@ -340,8 +334,6 @@ func (s *Service) AdminUpdate(ctx context.Context, userID uuid.UUID, input *user
 	if input.IsActive != nil {
 		u.IsActive = *input.IsActive
 	}
-
-	u.OnboardingCompleted = isOnboardingCompleted(u)
 
 	if err := s.repo.Update(ctx, u); err != nil {
 		return nil, err
@@ -418,13 +410,6 @@ func isValidPhone(phone string) bool {
 	pattern := `^1[3-9]\d{9}$`
 	matched, _ := regexp.MatchString(pattern, phone)
 	return matched
-}
-
-// isOnboardingCompleted 检查用户资料是否完整
-func isOnboardingCompleted(u *user.User) bool {
-	return u.Nickname != nil && *u.Nickname != "" &&
-		u.BirthYear != nil &&
-		u.Hometown != nil && *u.Hometown != ""
 }
 
 // nilIfEmpty 空字符串转 nil

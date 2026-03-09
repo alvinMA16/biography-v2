@@ -239,41 +239,6 @@ func (s *Service) ExtractProfile(ctx context.Context, conversation string) (*Ext
 	return &profile, nil
 }
 
-// CheckProfileCompletion 检查信息收集是否完成
-func (s *Service) CheckProfileCompletion(ctx context.Context, conversation string) (bool, error) {
-	if conversation == "" {
-		return false, ErrEmptyInput
-	}
-
-	provider, err := s.manager.Primary()
-	if err != nil {
-		return false, ErrLLMNotAvailable
-	}
-
-	promptText, err := renderTemplate(prompt.ProfileCompletionCheckPrompt, map[string]interface{}{
-		"Conversation": conversation,
-	})
-	if err != nil {
-		return false, err
-	}
-
-	resp, err := provider.Chat(ctx, []llm.Message{
-		{Role: "user", Content: promptText},
-	})
-	if err != nil {
-		return false, err
-	}
-
-	var result struct {
-		Complete bool `json:"complete"`
-	}
-	if err := parseJSONResponse(resp.Content, &result); err != nil {
-		return false, err
-	}
-
-	return result.Complete, nil
-}
-
 // GenerateEraMemories 生成时代记忆
 func (s *Service) GenerateEraMemories(ctx context.Context, birthYear int, hometown, mainCity string) (string, error) {
 	provider, err := s.manager.Primary()
