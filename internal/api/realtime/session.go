@@ -379,7 +379,7 @@ func (s *Session) finishUserTurn() error {
 				Type: "function",
 				Function: llm.ToolFunction{
 					Name:        "end_conversation",
-					Description: "当你想结束这次对话时，在说完结束语后调用此函数结束会话。",
+					Description: "当用户明确表示想结束，或首次体验已经完成一小段完整回忆、适合自然收束时，在说完结束语后调用此函数结束会话。",
 					Parameters: map[string]interface{}{
 						"type":       "object",
 						"properties": map[string]interface{}{},

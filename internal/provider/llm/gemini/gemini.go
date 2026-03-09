@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
@@ -28,6 +29,62 @@ type Provider struct {
 	model       string
 	modelFast   string
 	proxy       string
+}
+
+type generateContentRequest struct {
+	Contents          []geminiContent         `json:"contents,omitempty"`
+	SystemInstruction *geminiContent          `json:"systemInstruction,omitempty"`
+	Tools             []geminiTool            `json:"tools,omitempty"`
+	ToolConfig        *geminiToolConfig       `json:"toolConfig,omitempty"`
+	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
+}
+
+type geminiContent struct {
+	Role  string       `json:"role,omitempty"`
+	Parts []geminiPart `json:"parts"`
+}
+
+type geminiPart struct {
+	Text         string              `json:"text,omitempty"`
+	FunctionCall *geminiFunctionCall `json:"functionCall,omitempty"`
+}
+
+type geminiTool struct {
+	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
+}
+
+type geminiFunctionDeclaration struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+}
+
+type geminiToolConfig struct {
+	FunctionCallingConfig *geminiFunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+}
+
+type geminiFunctionCallingConfig struct {
+	Mode string `json:"mode,omitempty"`
+}
+
+type geminiGenerationConfig struct {
+	Temperature *float32 `json:"temperature,omitempty"`
+	TopP        *float32 `json:"topP,omitempty"`
+}
+
+type generateContentResponse struct {
+	Candidates []struct {
+		Content      *geminiContent `json:"content"`
+		FinishReason string         `json:"finishReason"`
+	} `json:"candidates"`
+	UsageMetadata *struct {
+		TotalTokenCount int32 `json:"totalTokenCount"`
+	} `json:"usageMetadata,omitempty"`
+}
+
+type geminiFunctionCall struct {
+	Name string                 `json:"name"`
+	Args map[string]interface{} `json:"args,omitempty"`
 }
 
 // New 创建 Gemini 提供者
@@ -215,10 +272,58 @@ func (p *Provider) Chat(ctx context.Context, messages []llm.Message) (*llm.Respo
 	}, nil
 }
 
-// ChatWithTools 带工具的同步对话（Gemini 暂不支持，回退到普通 Chat）
+// ChatWithTools 带工具的同步对话
 func (p *Provider) ChatWithTools(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
-	// Gemini 暂不实现 tools，直接调用普通 Chat
-	return p.Chat(ctx, messages)
+	contents, systemInstruction := convertMessagesToGeminiContents(messages)
+
+	temperature := float32(0.7)
+	topP := float32(0.9)
+	reqBody := generateContentRequest{
+		Contents: contents,
+		Tools:    convertToolsToGeminiTools(tools),
+		ToolConfig: &geminiToolConfig{
+			FunctionCallingConfig: &geminiFunctionCallingConfig{
+				Mode: "AUTO",
+			},
+		},
+		GenerationConfig: &geminiGenerationConfig{
+			Temperature: &temperature,
+			TopP:        &topP,
+		},
+	}
+	if systemInstruction != nil {
+		reqBody.SystemInstruction = systemInstruction
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: failed to marshal tool request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", p.model, url.QueryEscape(p.apiKey))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("gemini: failed to create tool request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.rawClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: tool request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gemini: tool API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var geminiResp generateContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+		return nil, fmt.Errorf("gemini: failed to decode tool response: %w", err)
+	}
+
+	return parseToolResponse(&geminiResp)
 }
 
 // ChatStream 流式对话
@@ -358,4 +463,116 @@ func (p *Provider) getTokensUsed(resp *genai.GenerateContentResponse) int {
 	}
 
 	return int(resp.UsageMetadata.TotalTokenCount)
+}
+
+func convertMessagesToGeminiContents(messages []llm.Message) ([]geminiContent, *geminiContent) {
+	contents := make([]geminiContent, 0, len(messages))
+	var systemInstruction *geminiContent
+
+	for _, msg := range messages {
+		text := strings.TrimSpace(msg.Content)
+		if text == "" {
+			continue
+		}
+
+		switch msg.Role {
+		case "system":
+			systemInstruction = &geminiContent{
+				Parts: []geminiPart{{Text: text}},
+			}
+		case "user":
+			contents = append(contents, geminiContent{
+				Role:  "user",
+				Parts: []geminiPart{{Text: text}},
+			})
+		case "assistant":
+			contents = append(contents, geminiContent{
+				Role:  "model",
+				Parts: []geminiPart{{Text: text}},
+			})
+		}
+	}
+
+	return contents, systemInstruction
+}
+
+func convertToolsToGeminiTools(tools []llm.Tool) []geminiTool {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	declarations := make([]geminiFunctionDeclaration, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "function" {
+			continue
+		}
+		declarations = append(declarations, geminiFunctionDeclaration{
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			Parameters:  tool.Function.Parameters,
+		})
+	}
+	if len(declarations) == 0 {
+		return nil
+	}
+
+	return []geminiTool{
+		{FunctionDeclarations: declarations},
+	}
+}
+
+func parseToolResponse(resp *generateContentResponse) (*llm.Response, error) {
+	if resp == nil || len(resp.Candidates) == 0 {
+		return nil, errors.New("gemini: no candidates in tool response")
+	}
+
+	candidate := resp.Candidates[0]
+	if candidate.Content == nil {
+		return &llm.Response{}, nil
+	}
+
+	var textParts []string
+	toolCalls := make([]llm.ToolCall, 0)
+
+	for idx, part := range candidate.Content.Parts {
+		if strings.TrimSpace(part.Text) != "" {
+			textParts = append(textParts, part.Text)
+		}
+		if part.FunctionCall != nil {
+			args := "{}"
+			if len(part.FunctionCall.Args) > 0 {
+				if encoded, err := json.Marshal(part.FunctionCall.Args); err == nil {
+					args = string(encoded)
+				}
+			}
+			toolCalls = append(toolCalls, llm.ToolCall{
+				ID:   fmt.Sprintf("gemini-call-%d", idx),
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      part.FunctionCall.Name,
+					Arguments: args,
+				},
+			})
+		}
+	}
+
+	finishReason := strings.ToLower(strings.TrimSpace(candidate.FinishReason))
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+
+	tokensUsed := 0
+	if resp.UsageMetadata != nil {
+		tokensUsed = int(resp.UsageMetadata.TotalTokenCount)
+	}
+
+	return &llm.Response{
+		Content:      strings.TrimSpace(strings.Join(textParts, "")),
+		FinishReason: finishReason,
+		TokensUsed:   tokensUsed,
+		ToolCalls:    toolCalls,
+	}, nil
 }
