@@ -626,7 +626,7 @@ func (h *Handler) DeleteMemoir(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "memoir deleted"})
 }
 
-// RegenerateMemoir 重新生成回忆录
+// RegenerateMemoir 重新生成当前这篇回忆录
 func (h *Handler) RegenerateMemoir(c *gin.Context) {
 	memoirID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -708,6 +708,43 @@ func (h *Handler) RegenerateMemoir(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, updatedMemoir)
+}
+
+// RegenerateMemoirGroup 重新拆分并生成该对话下的全部回忆录
+func (h *Handler) RegenerateMemoirGroup(c *gin.Context) {
+	memoirID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memoir id"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	m, err := h.memoirService.AdminGetByID(ctx, memoirID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, memoirService.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	if m.ConversationID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "memoir has no associated conversation"})
+		return
+	}
+
+	memoirs, err := h.flowService.RebuildMemoirsForConversation(ctx, *m.ConversationID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to regenerate memoir group: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "memoir group regenerated",
+		"memoirs": memoirs,
+	})
 }
 
 // derefString 安全解引用字符串指针

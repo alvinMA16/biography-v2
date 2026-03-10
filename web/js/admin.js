@@ -1772,8 +1772,12 @@ function showMemoirDetail(memoirId) {
     // 设置标题
     document.getElementById('memoirDetailTitle').textContent = memoir.title;
     const regenerateBtn = document.getElementById('adminRegenerateMemoirBtn');
+    const regenerateGroupBtn = document.getElementById('adminRegenerateMemoirGroupBtn');
     if (regenerateBtn) {
         regenerateBtn.disabled = !memoir.conversation_id;
+    }
+    if (regenerateGroupBtn) {
+        regenerateGroupBtn.disabled = !memoir.conversation_id;
     }
 
     // 设置元信息
@@ -1842,6 +1846,59 @@ async function regenerateAdminMemoir() {
     } finally {
         btn.disabled = !currentMemoirDetail || !currentMemoirDetail.conversation_id;
         btn.textContent = originalText;
+    }
+}
+
+async function regenerateAdminMemoirGroup() {
+    if (!currentMemoirDetail) return;
+    if (!currentMemoirDetail.conversation_id) {
+        alert('这篇回忆没有关联对话，无法重新拆分。');
+        return;
+    }
+
+    if (!confirm('确定要重新拆分并生成这场对话下的全部回忆录吗？这会替换当前这组回忆录。')) {
+        return;
+    }
+
+    const userId = currentUserDetail?.id;
+    const singleBtn = document.getElementById('adminRegenerateMemoirBtn');
+    const groupBtn = document.getElementById('adminRegenerateMemoirGroupBtn');
+    const originalSingleText = singleBtn ? singleBtn.textContent : '';
+    const originalGroupText = groupBtn ? groupBtn.textContent : '';
+
+    if (singleBtn) singleBtn.disabled = true;
+    if (groupBtn) {
+        groupBtn.disabled = true;
+        groupBtn.textContent = '重建中...';
+    }
+
+    try {
+        const result = await adminRequest(`/admin/memoirs/${currentMemoirDetail.id}/regenerate-all`, {
+            method: 'POST'
+        });
+
+        const memoirs = Array.isArray(result.memoirs) ? result.memoirs : [];
+        if (userId) {
+            await viewUserDetail(userId);
+        }
+
+        if (memoirs.length > 0 && currentUserDetail?.memoirs?.some(m => m.id === memoirs[0].id)) {
+            showMemoirDetail(memoirs[0].id);
+        } else {
+            closeMemoirDetailModal();
+        }
+    } catch (error) {
+        console.error('重新拆分并生成回忆录失败:', error);
+        alert('重新拆分并生成失败: ' + error.message);
+    } finally {
+        if (singleBtn) {
+            singleBtn.disabled = !currentMemoirDetail || !currentMemoirDetail.conversation_id;
+            singleBtn.textContent = originalSingleText;
+        }
+        if (groupBtn) {
+            groupBtn.disabled = !currentMemoirDetail || !currentMemoirDetail.conversation_id;
+            groupBtn.textContent = originalGroupText;
+        }
     }
 }
 

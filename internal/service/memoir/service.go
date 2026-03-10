@@ -286,6 +286,22 @@ func (s *Service) AdminDelete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.SoftDelete(ctx, id)
 }
 
+// AdminDeleteByConversation 管理员删除同一场对话下的所有回忆录
+func (s *Service) AdminDeleteByConversation(ctx context.Context, conversationID uuid.UUID) error {
+	memoirs, err := s.repo.ListByConversationID(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+
+	for _, m := range memoirs {
+		if err := s.repo.SoftDelete(ctx, m.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // nilIfEmpty 空字符串转 nil
 func nilIfEmpty(s string) *string {
 	if s == "" {

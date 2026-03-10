@@ -171,6 +171,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		adminRoutes.PUT("/memoirs/:id", adminHandler.UpdateMemoir)
 		adminRoutes.DELETE("/memoirs/:id", adminHandler.DeleteMemoir)
 		adminRoutes.POST("/memoirs/:id/regenerate", adminHandler.RegenerateMemoir)
+		adminRoutes.POST("/memoirs/:id/regenerate-all", adminHandler.RegenerateMemoirGroup)
 
 		// 话题管理
 		adminRoutes.GET("/topics", adminHandler.ListTopics)

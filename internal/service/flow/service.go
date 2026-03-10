@@ -292,6 +292,49 @@ func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *co
 
 	log.Printf("[Flow] 自动生成回忆录: %s", conv.ID)
 
+	generated := s.generateMemoirsForConversation(ctx, u, conv, conversationText)
+	if len(generated) == 0 {
+		return nil
+	}
+
+	return generated[0]
+}
+
+// RebuildMemoirsForConversation 重新拆分并生成一场对话下的全部回忆录
+func (s *Service) RebuildMemoirsForConversation(ctx context.Context, conversationID uuid.UUID) ([]*memoir.Memoir, error) {
+	conv, err := s.convService.GetByID(ctx, conversationID)
+	if err != nil {
+		if errors.Is(err, convService.ErrNotFound) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, err
+	}
+
+	u, err := s.userService.GetByID(ctx, conv.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	messages, err := s.convService.GetAllMessages(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+
+	conversationText := buildConversationText(messages)
+	if strings.TrimSpace(conversationText) == "" {
+		return nil, errors.New("conversation is empty")
+	}
+
+	if err := s.memoirService.AdminDeleteByConversation(ctx, conversationID); err != nil {
+		return nil, err
+	}
+
+	return s.generateMemoirsForConversation(ctx, u, conv, conversationText), nil
+}
+
+func (s *Service) generateMemoirsForConversation(ctx context.Context, u *user.User, conv *conversation.Conversation, conversationText string) []*memoir.Memoir {
+	log.Printf("[Flow] 自动生成回忆录: %s", conv.ID)
+
 	topicTitle := ""
 	if conv.Topic != nil {
 		topicTitle = *conv.Topic
@@ -318,8 +361,12 @@ func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *co
 		}
 	}
 
-	var firstCreated *memoir.Memoir
+	var createdMemoirs []*memoir.Memoir
 	for _, plan := range plans {
+		if !plan.ShouldGenerate {
+			continue
+		}
+
 		excerpt := extractConversationExcerpt(conversationText, plan.StartAnchor, plan.EndAnchor)
 		if strings.TrimSpace(excerpt) == "" {
 			excerpt = strings.TrimSpace(conversationText)
@@ -338,8 +385,8 @@ func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *co
 		if err != nil {
 			log.Printf("[Flow] 生成回忆录内容失败，回退原始记录: title_hint=%s err=%v", plan.TitleHint, err)
 			m := s.createFallbackMemoir(ctx, u.ID, conv.ID, fallbackMemoirTitle(topicTitle, plan.TitleHint), excerpt)
-			if firstCreated == nil && m != nil {
-				firstCreated = m
+			if m != nil {
+				createdMemoirs = append(createdMemoirs, m)
 			}
 			continue
 		}
@@ -361,16 +408,19 @@ func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *co
 			log.Printf("[Flow] 回忆录生成成功: %s", m.Title)
 		}
 
-		if firstCreated == nil && m != nil {
-			firstCreated = m
+		if m != nil {
+			createdMemoirs = append(createdMemoirs, m)
 		}
 	}
 
-	if firstCreated == nil {
-		return s.createFallbackMemoir(ctx, u.ID, conv.ID, fallbackMemoirTitle(topicTitle, ""), strings.TrimSpace(conversationText))
+	if len(createdMemoirs) == 0 {
+		fallback := s.createFallbackMemoir(ctx, u.ID, conv.ID, fallbackMemoirTitle(topicTitle, ""), strings.TrimSpace(conversationText))
+		if fallback != nil {
+			return []*memoir.Memoir{fallback}
+		}
 	}
 
-	return firstCreated
+	return createdMemoirs
 }
 
 // handleTopicPool 根据回忆录数量处理话题池
