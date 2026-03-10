@@ -169,8 +169,20 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 
 	log.Printf("[Realtime] 新连接: user_id=%s, mode=%s, topic_id=%s", userID, mode, topicID)
 
+	convID, err := h.resolveConversationID(c.Request.Context(), userID, config)
+	if err != nil {
+		log.Printf("[Realtime] 预创建对话失败，回退结束时保存: %v", err)
+	}
+
 	// 创建会话
-	session := NewSession(conn, config, h.asrProvider, h.llmManager, h.ttsProvider)
+	session := NewSession(
+		conn,
+		config,
+		h.asrProvider,
+		h.llmManager,
+		h.ttsProvider,
+		h.makeMessagePersistor(convID),
+	)
 
 	// 运行会话
 	if err := session.Run(); err != nil {
@@ -234,33 +246,20 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 		return
 	}
 
-	// 优先写入前端传入的 conversation_id，避免实时会话与 REST 流程断链
-	var convID uuid.UUID
-	if config.ConversationID != "" {
-		if parsed, err := uuid.Parse(config.ConversationID); err == nil {
-			if _, err := h.convService.GetByIDForUser(ctx, parsed, userID); err == nil {
-				convID = parsed
-			} else {
-				log.Printf("[Realtime] 指定对话不可用，回退自动创建: conv=%s err=%v", parsed, err)
-			}
-		}
+	convID, err := h.resolveConversationID(ctx, userID, config)
+	if err != nil {
+		log.Printf("[Realtime] 创建或获取对话失败: %v", err)
+		return
 	}
 
-	if convID == uuid.Nil {
-		conv, err := h.convService.Create(ctx, userID, &conversation.CreateConversationInput{
-			Topic:    config.TopicTitle,
-			Greeting: config.TopicGreeting,
-			Context:  config.TopicContext,
-		})
-		if err != nil {
-			log.Printf("[Realtime] 创建对话失败: %v", err)
-			return
-		}
-		convID = conv.ID
+	existingMessages, err := h.convService.GetAllMessages(ctx, convID)
+	if err != nil {
+		log.Printf("[Realtime] 获取已保存消息失败: %v", err)
+		existingMessages = nil
 	}
 
-	// 仅保存消息；对话结束、摘要、回忆录由 /conversations/:id/end-quick 流程处理
-	for _, msg := range userMessages {
+	persistedPrefix := countPersistedPrefix(existingMessages, userMessages)
+	for _, msg := range userMessages[persistedPrefix:] {
 		if _, err := h.convService.AddMessage(ctx, convID, msg.Role, msg.Content); err != nil {
 			log.Printf("[Realtime] 保存消息失败: %v", err)
 		}
@@ -278,6 +277,58 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 	}
 
 	log.Printf("[Realtime] 对话消息保存成功: conversation_id=%s, messages=%d", convID, len(userMessages))
+}
+
+func (h *Handler) resolveConversationID(ctx context.Context, userID uuid.UUID, config *SessionConfig) (uuid.UUID, error) {
+	if config.ConversationID != "" {
+		if parsed, err := uuid.Parse(config.ConversationID); err == nil {
+			if _, err := h.convService.GetByIDForUser(ctx, parsed, userID); err == nil {
+				return parsed, nil
+			}
+			log.Printf("[Realtime] 指定对话不可用，回退自动创建: conv=%s err=%v", parsed, err)
+		}
+	}
+
+	conv, err := h.convService.Create(ctx, userID, &conversation.CreateConversationInput{
+		Topic:    config.TopicTitle,
+		Greeting: config.TopicGreeting,
+		Context:  config.TopicContext,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	config.ConversationID = conv.ID.String()
+	return conv.ID, nil
+}
+
+func (h *Handler) makeMessagePersistor(conversationID uuid.UUID) func(role, content string) error {
+	if conversationID == uuid.Nil {
+		return nil
+	}
+
+	return func(role, content string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, err := h.convService.AddMessage(ctx, conversationID, role, content)
+		return err
+	}
+}
+
+func countPersistedPrefix(existing []conversation.Message, expected []llm.Message) int {
+	limit := len(existing)
+	if len(expected) < limit {
+		limit = len(expected)
+	}
+
+	matched := 0
+	for matched < limit {
+		if existing[matched].Role != expected[matched].Role || existing[matched].Content != expected[matched].Content {
+			break
+		}
+		matched++
+	}
+	return matched
 }
 
 func resolveSessionMode(raw string, onboardingCompleted bool) Mode {

@@ -180,6 +180,11 @@ func (s *Service) GetByConversationID(ctx context.Context, conversationID uuid.U
 	return m, nil
 }
 
+// ListByConversationID 根据对话 ID 获取所有回忆录
+func (s *Service) ListByConversationID(ctx context.Context, conversationID uuid.UUID) ([]*memoir.Memoir, error) {
+	return s.repo.ListByConversationID(ctx, conversationID)
+}
+
 // Count 获取用户回忆录数量
 func (s *Service) Count(ctx context.Context, userID uuid.UUID) (int, error) {
 	return s.repo.Count(ctx, userID)

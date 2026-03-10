@@ -247,12 +247,14 @@ func (r *Repository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*mem
 	return memoirs, nil
 }
 
-// GetByConversationID 根据对话 ID 获取回忆录
+// GetByConversationID 根据对话 ID 获取第一篇回忆录
 func (r *Repository) GetByConversationID(ctx context.Context, conversationID uuid.UUID) (*memoir.Memoir, error) {
 	query := `
 		SELECT id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
 		FROM memoirs
 		WHERE conversation_id = $1 AND deleted_at IS NULL
+		ORDER BY sort_order ASC, created_at ASC
+		LIMIT 1
 	`
 
 	var m memoir.Memoir
@@ -281,6 +283,48 @@ func (r *Repository) GetByConversationID(ctx context.Context, conversationID uui
 	}
 
 	return &m, nil
+}
+
+// ListByConversationID 根据对话 ID 获取所有回忆录
+func (r *Repository) ListByConversationID(ctx context.Context, conversationID uuid.UUID) ([]*memoir.Memoir, error) {
+	query := `
+		SELECT id, user_id, conversation_id, title, content, status, source_conversations, time_period, start_year, end_year, sort_order, created_at, updated_at, deleted_at
+		FROM memoirs
+		WHERE conversation_id = $1 AND deleted_at IS NULL
+		ORDER BY sort_order ASC, created_at ASC
+	`
+
+	rows, err := r.pool.Query(ctx, query, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var memoirs []*memoir.Memoir
+	for rows.Next() {
+		var m memoir.Memoir
+		if err := rows.Scan(
+			&m.ID,
+			&m.UserID,
+			&m.ConversationID,
+			&m.Title,
+			&m.Content,
+			&m.Status,
+			&m.SourceConversations,
+			&m.TimePeriod,
+			&m.StartYear,
+			&m.EndYear,
+			&m.SortOrder,
+			&m.CreatedAt,
+			&m.UpdatedAt,
+			&m.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		memoirs = append(memoirs, &m)
+	}
+
+	return memoirs, nil
 }
 
 // GetMaxSortOrder 获取用户回忆录的最大排序值

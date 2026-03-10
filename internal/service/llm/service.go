@@ -34,12 +34,14 @@ func New(manager *llm.Manager) *Service {
 
 // GenerateMemoirInput 生成回忆录输入
 type GenerateMemoirInput struct {
-	UserName     string
-	BirthYear    *int
-	Hometown     string
-	StoryMemory  string
-	Topic        string
-	Conversation string
+	UserName            string
+	BirthYear           *int
+	Hometown            string
+	StoryMemory         string
+	Topic               string
+	MemoirTheme         string
+	CoverageSummary     string
+	ConversationExcerpt string
 }
 
 // GenerateMemoirOutput 生成回忆录输出
@@ -51,9 +53,89 @@ type GenerateMemoirOutput struct {
 	EndYear    *int   `json:"end_year"`
 }
 
+// PlanMemoirsInput 回忆录拆分规划输入
+type PlanMemoirsInput struct {
+	UserName     string
+	BirthYear    *int
+	Hometown     string
+	StoryMemory  string
+	Topic        string
+	Conversation string
+}
+
+// PlannedMemoir 回忆录规划结果
+type PlannedMemoir struct {
+	ShouldGenerate  bool   `json:"should_generate"`
+	TitleHint       string `json:"title_hint"`
+	Theme           string `json:"theme"`
+	Reason          string `json:"reason"`
+	CoverageSummary string `json:"coverage_summary"`
+	StartAnchor     string `json:"start_anchor"`
+	EndAnchor       string `json:"end_anchor"`
+	Confidence      string `json:"confidence"`
+}
+
+// PlanMemoirs 规划本次对话适合生成的回忆录篇目
+func (s *Service) PlanMemoirs(ctx context.Context, input *PlanMemoirsInput) ([]PlannedMemoir, error) {
+	if strings.TrimSpace(input.Conversation) == "" {
+		return nil, ErrEmptyInput
+	}
+
+	if _, err := s.manager.Primary(); err != nil {
+		return nil, ErrLLMNotAvailable
+	}
+
+	birthYear := 0
+	if input.BirthYear != nil {
+		birthYear = *input.BirthYear
+	}
+
+	promptText, err := renderTemplate(prompt.MemoirPlanPrompt, map[string]interface{}{
+		"UserName":     input.UserName,
+		"BirthYear":    birthYear,
+		"Hometown":     input.Hometown,
+		"StoryMemory":  fallbackText(input.StoryMemory, "暂无"),
+		"Topic":        input.Topic,
+		"Conversation": input.Conversation,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		resp, providerName, err := s.manager.ChatWithRetry(ctx, []llm.Message{
+			{Role: "user", Content: promptText},
+		}, 1)
+		if err != nil {
+			lastErr = err
+			log.Printf("[LLM] PlanMemoirs failed (attempt %d/3 provider=%s): %v", attempt, providerName, err)
+			continue
+		}
+
+		var plans []PlannedMemoir
+		if err := parseJSONResponse(resp.Content, &plans); err != nil {
+			lastErr = err
+			log.Printf("[LLM] PlanMemoirs invalid response (attempt %d/3 provider=%s): %s", attempt, providerName, truncateForLog(resp.Content, 1000))
+			continue
+		}
+
+		plans = normalizeMemoirPlans(plans)
+		if len(plans) == 0 {
+			lastErr = ErrInvalidResponse
+			log.Printf("[LLM] PlanMemoirs empty plans (attempt %d/3 provider=%s)", attempt, providerName)
+			continue
+		}
+
+		return plans, nil
+	}
+
+	return nil, lastErr
+}
+
 // GenerateMemoir 生成回忆录
 func (s *Service) GenerateMemoir(ctx context.Context, input *GenerateMemoirInput) (*memoir.GeneratedMemoir, error) {
-	if input.Conversation == "" {
+	if strings.TrimSpace(input.ConversationExcerpt) == "" {
 		return nil, ErrEmptyInput
 	}
 
@@ -68,12 +150,14 @@ func (s *Service) GenerateMemoir(ctx context.Context, input *GenerateMemoirInput
 	}
 
 	promptText, err := renderTemplate(prompt.MemoirPrompt, map[string]interface{}{
-		"UserName":     input.UserName,
-		"BirthYear":    birthYear,
-		"Hometown":     input.Hometown,
-		"StoryMemory":  fallbackText(input.StoryMemory, "暂无"),
-		"Topic":        input.Topic,
-		"Conversation": input.Conversation,
+		"UserName":            input.UserName,
+		"BirthYear":           birthYear,
+		"Hometown":            input.Hometown,
+		"StoryMemory":         fallbackText(input.StoryMemory, "暂无"),
+		"Topic":               input.Topic,
+		"MemoirTheme":         fallbackText(input.MemoirTheme, "本次对话中的一段重要经历"),
+		"CoverageSummary":     fallbackText(input.CoverageSummary, "围绕当前主题，把用户明确讲过的重要内容整理成篇"),
+		"ConversationExcerpt": input.ConversationExcerpt,
 	})
 	if err != nil {
 		return nil, err
@@ -426,4 +510,33 @@ func fallbackText(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func normalizeMemoirPlans(plans []PlannedMemoir) []PlannedMemoir {
+	var normalized []PlannedMemoir
+	for _, plan := range plans {
+		plan.TitleHint = strings.TrimSpace(plan.TitleHint)
+		plan.Theme = strings.TrimSpace(plan.Theme)
+		plan.Reason = strings.TrimSpace(plan.Reason)
+		plan.CoverageSummary = strings.TrimSpace(plan.CoverageSummary)
+		plan.StartAnchor = strings.TrimSpace(plan.StartAnchor)
+		plan.EndAnchor = strings.TrimSpace(plan.EndAnchor)
+		plan.Confidence = strings.ToLower(strings.TrimSpace(plan.Confidence))
+
+		if !plan.ShouldGenerate {
+			continue
+		}
+		if plan.Theme == "" || plan.CoverageSummary == "" {
+			continue
+		}
+		if plan.Confidence == "" {
+			plan.Confidence = "medium"
+		}
+
+		normalized = append(normalized, plan)
+		if len(normalized) >= 3 {
+			break
+		}
+	}
+	return normalized
 }

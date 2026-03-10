@@ -284,22 +284,20 @@ func (s *Service) generateSummary(ctx context.Context, conv *conversation.Conver
 
 // autoGenerateMemoir 自动生成回忆录
 func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *conversation.Conversation, conversationText string) *memoir.Memoir {
-	// 检查是否已有回忆录
-	existing, _ := s.memoirService.GetByConversationID(ctx, conv.ID)
-	if existing != nil {
-		log.Printf("[Flow] 该对话已有回忆录，跳过自动生成")
-		return existing
+	existingMemoirs, err := s.memoirService.ListByConversationID(ctx, conv.ID)
+	if err == nil && len(existingMemoirs) > 0 {
+		log.Printf("[Flow] 该对话已有 %d 篇回忆录，跳过自动生成", len(existingMemoirs))
+		return existingMemoirs[0]
 	}
 
 	log.Printf("[Flow] 自动生成回忆录: %s", conv.ID)
 
-	// 调用 LLM 生成回忆录
 	topicTitle := ""
 	if conv.Topic != nil {
 		topicTitle = *conv.Topic
 	}
 
-	result, err := s.llmService.GenerateMemoir(ctx, &llmService.GenerateMemoirInput{
+	plans, err := s.llmService.PlanMemoirs(ctx, &llmService.PlanMemoirsInput{
 		UserName:     u.DisplayName(),
 		BirthYear:    u.BirthYear,
 		Hometown:     derefString(u.Hometown),
@@ -308,46 +306,71 @@ func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *co
 		Conversation: conversationText,
 	})
 	if err != nil {
-		log.Printf("[Flow] 生成回忆录内容失败: %v", err)
-		fallbackTitle := "一段对话记录"
-		if topicTitle != "" {
-			fallbackTitle = topicTitle
+		log.Printf("[Flow] 回忆录规划失败，回退到单篇生成: %v", err)
+		plans = []llmService.PlannedMemoir{
+			{
+				ShouldGenerate:  true,
+				TitleHint:       fallbackMemoirTitle(topicTitle, ""),
+				Theme:           fallbackString(topicTitle, "本次对话中的一段重要经历"),
+				CoverageSummary: "围绕这次对话中的主要经历，忠实整理用户明确讲过的重要内容",
+				Confidence:      "medium",
+			},
+		}
+	}
+
+	var firstCreated *memoir.Memoir
+	for _, plan := range plans {
+		excerpt := extractConversationExcerpt(conversationText, plan.StartAnchor, plan.EndAnchor)
+		if strings.TrimSpace(excerpt) == "" {
+			excerpt = strings.TrimSpace(conversationText)
 		}
 
-		fallbackInput := &memoir.CreateMemoirInput{
+		result, err := s.llmService.GenerateMemoir(ctx, &llmService.GenerateMemoirInput{
+			UserName:            u.DisplayName(),
+			BirthYear:           u.BirthYear,
+			Hometown:            derefString(u.Hometown),
+			StoryMemory:         derefString(u.StoryMemory),
+			Topic:               topicTitle,
+			MemoirTheme:         plan.Theme,
+			CoverageSummary:     plan.CoverageSummary,
+			ConversationExcerpt: excerpt,
+		})
+		if err != nil {
+			log.Printf("[Flow] 生成回忆录内容失败，回退原始记录: title_hint=%s err=%v", plan.TitleHint, err)
+			m := s.createFallbackMemoir(ctx, u.ID, conv.ID, fallbackMemoirTitle(topicTitle, plan.TitleHint), excerpt)
+			if firstCreated == nil && m != nil {
+				firstCreated = m
+			}
+			continue
+		}
+
+		input := &memoir.CreateMemoirInput{
 			ConversationID: &conv.ID,
-			Title:          fallbackTitle,
-			Content:        strings.TrimSpace(conversationText),
+			Title:          result.Title,
+			Content:        result.Content,
+			TimePeriod:     result.TimePeriod,
+			StartYear:      result.StartYear,
+			EndYear:        result.EndYear,
 		}
 
-		m, createErr := s.memoirService.Create(ctx, u.ID, fallbackInput)
-		if createErr != nil {
-			log.Printf("[Flow] 创建原始对话记录失败: %v", createErr)
-			return nil
+		m, err := s.memoirService.Create(ctx, u.ID, input)
+		if err != nil {
+			log.Printf("[Flow] 创建回忆录失败，回退原始记录: title=%s err=%v", result.Title, err)
+			m = s.createFallbackMemoir(ctx, u.ID, conv.ID, fallbackMemoirTitle(topicTitle, plan.TitleHint), excerpt)
+		} else {
+			log.Printf("[Flow] 回忆录生成成功: %s", m.Title)
 		}
 
-		log.Printf("[Flow] 已回退创建原始对话记录: %s", m.Title)
-		return m
+		if firstCreated == nil && m != nil {
+			firstCreated = m
+		}
 	}
 
-	// 创建回忆录
-	input := &memoir.CreateMemoirInput{
-		ConversationID: &conv.ID,
-		Title:          result.Title,
-		Content:        result.Content,
-		TimePeriod:     result.TimePeriod,
-		StartYear:      result.StartYear,
-		EndYear:        result.EndYear,
+	if firstCreated == nil {
+		return s.createFallbackMemoir(ctx, u.ID, conv.ID, fallbackMemoirTitle(topicTitle, ""), strings.TrimSpace(conversationText))
 	}
 
-	m, err := s.memoirService.Create(ctx, u.ID, input)
-	if err != nil {
-		log.Printf("[Flow] 创建回忆录失败: %v", err)
-		return nil
-	}
-
-	log.Printf("[Flow] 回忆录生成成功: %s", m.Title)
-	return m
+	return firstCreated
 }
 
 // handleTopicPool 根据回忆录数量处理话题池
@@ -359,12 +382,15 @@ func (s *Service) handleTopicPool(ctx context.Context, u *user.User) {
 		return
 	}
 
-	if count == 1 {
-		// 刚完成第一篇回忆录，首次生成个性化话题
-		log.Printf("[Flow] 用户完成第一篇回忆录，生成个性化话题")
+	if count <= 0 {
+		return
+	}
+
+	existingTopics, _ := s.topicService.GetAvailableForUser(ctx, u.ID, 100)
+	if len(existingTopics) == 0 {
+		log.Printf("[Flow] 用户已有回忆录但暂无个性化话题，生成首批话题")
 		s.generatePersonalizedTopics(ctx, u, 5)
-	} else if count > 1 {
-		// 已有多篇回忆录，审查话题池
+	} else if len(existingTopics) < 4 {
 		log.Printf("[Flow] 用户已有 %d 篇回忆录，审查话题池", count)
 		s.reviewTopicPool(ctx, u)
 	}
@@ -432,6 +458,33 @@ func (s *Service) reviewTopicPool(ctx context.Context, u *user.User) {
 		log.Printf("[Flow] 话题数量不足，补充新话题: need=%d", needed)
 		s.generatePersonalizedTopics(ctx, u, needed)
 	}
+}
+
+// RegenerateTopicPoolForUser 管理端触发：清理 AI 话题并重新生成
+func (s *Service) RegenerateTopicPoolForUser(ctx context.Context, userID uuid.UUID, count int) error {
+	u, err := s.userService.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	memoirCount, err := s.memoirService.Count(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if memoirCount <= 0 {
+		return errors.New("user has no memoirs to generate topics from")
+	}
+
+	if count <= 0 {
+		count = 5
+	}
+
+	if err := s.topicService.DeleteByUserAndSource(ctx, userID, topic.SourceAI); err != nil {
+		return err
+	}
+
+	s.generatePersonalizedTopics(ctx, u, count)
+	return nil
 }
 
 func (s *Service) updateStoryMemory(ctx context.Context, u *user.User, conversationText string) {
@@ -519,4 +572,69 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func extractConversationExcerpt(conversationText, startAnchor, endAnchor string) string {
+	text := strings.TrimSpace(conversationText)
+	if text == "" {
+		return ""
+	}
+
+	startIdx := 0
+	if anchor := strings.TrimSpace(startAnchor); anchor != "" {
+		if idx := strings.Index(text, anchor); idx >= 0 {
+			startIdx = idx
+		}
+	}
+
+	endIdx := len(text)
+	if anchor := strings.TrimSpace(endAnchor); anchor != "" {
+		if idx := strings.Index(text[startIdx:], anchor); idx >= 0 {
+			endIdx = startIdx + idx + len(anchor)
+		}
+	}
+
+	if endIdx <= startIdx {
+		return text
+	}
+
+	excerpt := strings.TrimSpace(text[startIdx:endIdx])
+	if excerpt == "" || len([]rune(excerpt)) < 80 {
+		return text
+	}
+	return excerpt
+}
+
+func fallbackMemoirTitle(topicTitle, titleHint string) string {
+	if strings.TrimSpace(titleHint) != "" {
+		return strings.TrimSpace(titleHint)
+	}
+	if strings.TrimSpace(topicTitle) != "" {
+		return strings.TrimSpace(topicTitle)
+	}
+	return "一段对话记录"
+}
+
+func fallbackString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}
+
+func (s *Service) createFallbackMemoir(ctx context.Context, userID, conversationID uuid.UUID, title, content string) *memoir.Memoir {
+	fallbackInput := &memoir.CreateMemoirInput{
+		ConversationID: &conversationID,
+		Title:          fallbackMemoirTitle("", title),
+		Content:        strings.TrimSpace(content),
+	}
+
+	m, err := s.memoirService.Create(ctx, userID, fallbackInput)
+	if err != nil {
+		log.Printf("[Flow] 创建原始对话记录失败: %v", err)
+		return nil
+	}
+
+	log.Printf("[Flow] 已回退创建原始对话记录: %s", m.Title)
+	return m
 }

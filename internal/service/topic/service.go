@@ -136,6 +136,11 @@ func (s *Service) Delete(ctx context.Context, id, userID uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
 }
 
+// DeleteByUserAndSource 删除用户指定来源的话题
+func (s *Service) DeleteByUserAndSource(ctx context.Context, userID uuid.UUID, source topic.Source) error {
+	return s.repo.DeleteByUserIDAndSource(ctx, userID, source)
+}
+
 // List 获取话题列表
 func (s *Service) List(ctx context.Context, userID uuid.UUID, status *topic.Status, limit, offset int) ([]*topic.TopicCandidate, int, error) {
 	if limit <= 0 {

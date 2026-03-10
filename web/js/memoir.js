@@ -80,7 +80,7 @@ function renderMemoirs(memoirs) {
                         <h3>${memoir.title}</h3>
                         ${isGenerating ? '<span class="memoir-status">撰写中...</span>' : ''}
                     </div>
-                    ${timeText ? `<p class="memoir-time">${timeText}</p>` : ''}
+                    ${timeText ? `<p class="memoir-time">来自聊天：${timeText}</p>` : ''}
                 </div>
                 <button class="btn-delete" onclick="deleteMemoir(event, '${memoir.id}')" title="删除">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -154,20 +154,7 @@ async function deleteMemoir(event, memoirId) {
     }
 }
 
-// 关闭弹窗
-function closeModal() {
-    document.getElementById('memoirModal').style.display = 'none';
-}
-
 // 返回首页
 function goHome() {
     window.location.href = 'index.html';
 }
-
-// 点击弹窗外部关闭
-document.addEventListener('click', function(event) {
-    const modal = document.getElementById('memoirModal');
-    if (event.target === modal) {
-        closeModal();
-    }
-});

@@ -49,10 +49,12 @@ type Session struct {
 	asrProvider asr.Provider
 	llmManager  *llm.Manager
 	ttsProvider tts.Provider
+	persistFunc func(role, content string) error
 
 	// 对话历史
 	messages              []llm.Message
 	firstSessionCompleted bool
+	livePersistEnabled    bool
 	mu                    sync.RWMutex
 
 	// 当前用户输入缓冲（由 ASR 消费协程写入）
@@ -79,18 +81,21 @@ func NewSession(
 	asrProvider asr.Provider,
 	llmManager *llm.Manager,
 	ttsProvider tts.Provider,
+	persistFunc func(role, content string) error,
 ) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Session{
-		conn:        conn,
-		config:      config,
-		state:       StateIdle,
-		asrProvider: asrProvider,
-		llmManager:  llmManager,
-		ttsProvider: ttsProvider,
-		messages:    make([]llm.Message, 0),
-		ctx:         ctx,
-		cancel:      cancel,
+		conn:               conn,
+		config:             config,
+		state:              StateIdle,
+		asrProvider:        asrProvider,
+		llmManager:         llmManager,
+		ttsProvider:        ttsProvider,
+		persistFunc:        persistFunc,
+		messages:           make([]llm.Message, 0),
+		livePersistEnabled: persistFunc != nil,
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 }
 
@@ -254,6 +259,7 @@ func (s *Session) init() error {
 			Content: greeting,
 		})
 		s.mu.Unlock()
+		s.tryPersistMessage("assistant", greeting)
 
 		// 发送文字
 		s.sendResponse(greeting)
@@ -345,6 +351,7 @@ func (s *Session) finishUserTurn() error {
 		Content: userText,
 	})
 	s.mu.Unlock()
+	s.tryPersistMessage("user", userText)
 
 	// 调用 LLM
 	provider, err := s.llmManager.Primary()
@@ -399,6 +406,7 @@ func (s *Session) finishUserTurn() error {
 		Content: assistantText,
 	})
 	s.mu.Unlock()
+	s.tryPersistMessage("assistant", assistantText)
 
 	// 发送文字响应
 	s.sendResponse(assistantText)
@@ -743,6 +751,27 @@ func (s *Session) FirstSessionCompleted() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.firstSessionCompleted
+}
+
+func (s *Session) tryPersistMessage(role, content string) {
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+
+	s.mu.Lock()
+	if !s.livePersistEnabled || s.persistFunc == nil {
+		s.mu.Unlock()
+		return
+	}
+	persist := s.persistFunc
+	s.mu.Unlock()
+
+	if err := persist(role, content); err != nil {
+		log.Printf("[Session] 实时保存消息失败，后续改为结束时补漏: role=%s err=%v", role, err)
+		s.mu.Lock()
+		s.livePersistEnabled = false
+		s.mu.Unlock()
+	}
 }
 
 func (s *Session) sendError(errMsg string) {

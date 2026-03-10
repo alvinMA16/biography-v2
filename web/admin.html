@@ -692,8 +692,13 @@
                         <!-- 话题池 -->
                         <div class="admin-card admin-topic-pool-card">
                             <div class="admin-card-header">
-                                <h3>话题池</h3>
-                                <span class="admin-count-badge" id="topicPoolCount">0</span>
+                                <div class="admin-card-header-main">
+                                    <h3>话题池</h3>
+                                    <span class="admin-count-badge" id="topicPoolCount">0</span>
+                                </div>
+                                <button class="admin-btn admin-btn-sm" id="regenerateTopicPoolBtn" onclick="regenerateTopicPool()">
+                                    重新生成
+                                </button>
                             </div>
                             <div class="admin-card-body" id="topicPoolContainer">
                                 <div class="admin-empty-state">暂无话题</div>
@@ -942,7 +947,10 @@
         <div class="modal-content admin-memoir-detail-modal">
             <div class="modal-header">
                 <h2 id="memoirDetailTitle">回忆详情</h2>
-                <button class="btn-close" onclick="closeMemoirDetailModal()">&times;</button>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button class="btn btn-secondary" id="adminRegenerateMemoirBtn" onclick="regenerateAdminMemoir()">重新生成</button>
+                    <button class="btn-close" onclick="closeMemoirDetailModal()">&times;</button>
+                </div>
             </div>
             <div class="modal-body">
                 <div class="admin-memoir-detail-tabs">

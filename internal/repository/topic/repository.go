@@ -344,6 +344,13 @@ func (r *Repository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 	return err
 }
 
+// DeleteByUserIDAndSource 删除用户指定来源的话题
+func (r *Repository) DeleteByUserIDAndSource(ctx context.Context, userID uuid.UUID, source topic.Source) error {
+	query := `DELETE FROM topic_candidates WHERE user_id = $1 AND source = $2`
+	_, err := r.pool.Exec(ctx, query, userID, source)
+	return err
+}
+
 // ListAll 获取所有话题（管理端使用）
 func (r *Repository) ListAll(ctx context.Context, userID *uuid.UUID, status *topic.Status, limit, offset int) ([]*topic.TopicCandidate, int, error) {
 	whereClause := "WHERE 1=1"

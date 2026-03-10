@@ -1379,6 +1379,10 @@ function renderUserDetail(detail) {
 
     // 话题池
     renderTopicPool(detail.topic_pool);
+    const regenerateBtn = document.getElementById('regenerateTopicPoolBtn');
+    if (regenerateBtn) {
+        regenerateBtn.disabled = !detail.id || (detail.memoirs || []).length === 0;
+    }
 
     // 时代记忆
     renderEraMemory(detail.era_memories);
@@ -1502,6 +1506,39 @@ function renderTopicPool(topics) {
             `;
         }).join('')}
     </div>`;
+}
+
+async function regenerateTopicPool() {
+    if (!currentUserDetail?.id) {
+        return;
+    }
+
+    if (!confirm('确定要为这个用户重新生成话题池吗？现有 AI 话题会被替换。')) {
+        return;
+    }
+
+    const btn = document.getElementById('regenerateTopicPoolBtn');
+    const originalText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '生成中...';
+    }
+
+    try {
+        const result = await adminRequest(`/admin/users/${currentUserDetail.id}/regenerate-topic-pool`, {
+            method: 'POST',
+        });
+        currentUserDetail.topic_pool = result.topic_pool || [];
+        renderTopicPool(currentUserDetail.topic_pool);
+        alert(result.message || '话题池已重新生成');
+    } catch (e) {
+        alert('重新生成话题池失败：' + e.message);
+    } finally {
+        if (btn) {
+            btn.disabled = !currentUserDetail?.id || (currentUserDetail.memoirs || []).length === 0;
+            btn.textContent = originalText || '重新生成';
+        }
+    }
 }
 
 function formatAgeRange(start, end) {
@@ -1734,6 +1771,10 @@ function showMemoirDetail(memoirId) {
 
     // 设置标题
     document.getElementById('memoirDetailTitle').textContent = memoir.title;
+    const regenerateBtn = document.getElementById('adminRegenerateMemoirBtn');
+    if (regenerateBtn) {
+        regenerateBtn.disabled = !memoir.conversation_id;
+    }
 
     // 设置元信息
     const yearText = formatYearRange(memoir.start_year, memoir.end_year, memoir.time_period);
@@ -1767,6 +1808,41 @@ function showMemoirDetail(memoirId) {
 
     // 显示弹窗
     document.getElementById('memoirDetailModal').style.display = 'flex';
+}
+
+async function regenerateAdminMemoir() {
+    if (!currentMemoirDetail) return;
+    if (!currentMemoirDetail.conversation_id) {
+        alert('这篇回忆没有关联对话，无法重新生成。');
+        return;
+    }
+
+    const btn = document.getElementById('adminRegenerateMemoirBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+
+    try {
+        const updatedMemoir = await adminRequest(`/admin/memoirs/${currentMemoirDetail.id}/regenerate`, {
+            method: 'POST'
+        });
+
+        if (currentUserDetail && Array.isArray(currentUserDetail.memoirs)) {
+            const index = currentUserDetail.memoirs.findIndex(m => m.id === currentMemoirDetail.id);
+            if (index >= 0) {
+                currentUserDetail.memoirs[index] = updatedMemoir;
+            }
+        }
+
+        currentMemoirDetail = updatedMemoir;
+        showMemoirDetail(updatedMemoir.id);
+    } catch (error) {
+        console.error('重新生成回忆录失败:', error);
+        alert('重新生成失败: ' + error.message);
+    } finally {
+        btn.disabled = !currentMemoirDetail || !currentMemoirDetail.conversation_id;
+        btn.textContent = originalText;
+    }
 }
 
 function closeMemoirDetailModal() {

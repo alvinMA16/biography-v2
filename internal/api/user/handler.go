@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -369,6 +370,7 @@ func (h *Handler) ListMemoirs(c *gin.Context) {
 		return
 	}
 	h.attachConversationTimes(c.Request.Context(), memoirs)
+	sortMemoirsByConversationTimeDesc(memoirs)
 
 	c.JSON(http.StatusOK, gin.H{
 		"memoirs": memoirs,
@@ -424,6 +426,27 @@ func (h *Handler) attachConversationTimes(ctx context.Context, memoirs []*memoir
 		m.ConversationStart = &start
 		m.ConversationEnd = &end
 	}
+}
+
+func sortMemoirsByConversationTimeDesc(memoirs []*memoir.Memoir) {
+	sort.SliceStable(memoirs, func(i, j int) bool {
+		left := memoirSortTime(memoirs[i])
+		right := memoirSortTime(memoirs[j])
+		return left.After(right)
+	})
+}
+
+func memoirSortTime(m *memoir.Memoir) time.Time {
+	if m == nil {
+		return time.Time{}
+	}
+	if m.ConversationEnd != nil {
+		return *m.ConversationEnd
+	}
+	if m.ConversationStart != nil {
+		return *m.ConversationStart
+	}
+	return m.CreatedAt
 }
 
 // UpdateMemoir 更新回忆录
@@ -541,11 +564,14 @@ func (h *Handler) RegenerateMemoir(c *gin.Context) {
 	}
 
 	generated, err := h.llmService.GenerateMemoir(c.Request.Context(), &llmService.GenerateMemoirInput{
-		UserName:     u.DisplayName(),
-		BirthYear:    u.BirthYear,
-		Hometown:     stringValue(u.Hometown),
-		Topic:        topicTitle,
-		Conversation: conversationText,
+		UserName:            u.DisplayName(),
+		BirthYear:           u.BirthYear,
+		Hometown:            stringValue(u.Hometown),
+		StoryMemory:         stringValue(u.StoryMemory),
+		Topic:               topicTitle,
+		MemoirTheme:         fallbackUserString(topicTitle, "本次对话中的主要经历"),
+		CoverageSummary:     "围绕这次对话中的主要经历，忠实整理用户明确讲过的重要内容",
+		ConversationExcerpt: conversationText,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -940,4 +966,11 @@ func stringValue(v *string) string {
 		return ""
 	}
 	return *v
+}
+
+func fallbackUserString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }

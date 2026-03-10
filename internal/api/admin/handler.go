@@ -26,6 +26,7 @@ import (
 	auditService "github.com/peizhengma/biography-v2/internal/service/audit"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
 	eraService "github.com/peizhengma/biography-v2/internal/service/era"
+	flowService "github.com/peizhengma/biography-v2/internal/service/flow"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
@@ -45,6 +46,7 @@ type Handler struct {
 	memoirService  *memoirService.Service
 	topicService   *topicService.Service
 	quoteService   *quoteService.Service
+	flowService    *flowService.Service
 	llmService     *llmService.Service
 	eraService     *eraService.Service
 	presetService  *presetService.Service
@@ -62,6 +64,7 @@ func NewHandler(
 	memoirSvc *memoirService.Service,
 	topicSvc *topicService.Service,
 	quoteSvc *quoteService.Service,
+	flowSvc *flowService.Service,
 	llmSvc *llmService.Service,
 	eraSvc *eraService.Service,
 	presetSvc *presetService.Service,
@@ -77,6 +80,7 @@ func NewHandler(
 		memoirService:  memoirSvc,
 		topicService:   topicSvc,
 		quoteService:   quoteSvc,
+		flowService:    flowSvc,
 		llmService:     llmSvc,
 		eraService:     eraSvc,
 		presetService:  presetSvc,
@@ -178,14 +182,14 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 	}
 
 	var input struct {
-		Nickname         *string `json:"nickname"`
-		PreferredName    *string `json:"preferred_name"`
-		Gender           *string `json:"gender"`
-		BirthYear        *int    `json:"birth_year"`
-		Hometown         *string `json:"hometown"`
-		MainCity         *string `json:"main_city"`
+		Nickname            *string `json:"nickname"`
+		PreferredName       *string `json:"preferred_name"`
+		Gender              *string `json:"gender"`
+		BirthYear           *int    `json:"birth_year"`
+		Hometown            *string `json:"hometown"`
+		MainCity            *string `json:"main_city"`
 		OnboardingCompleted *bool   `json:"onboarding_completed"`
-		IsActive         *bool   `json:"is_active"`
+		IsActive            *bool   `json:"is_active"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -193,14 +197,14 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 	}
 
 	user, err := h.userService.AdminUpdate(c.Request.Context(), userID, &user.AdminUpdateInput{
-		Nickname:         input.Nickname,
-		PreferredName:    input.PreferredName,
-		Gender:           input.Gender,
-		BirthYear:        input.BirthYear,
-		Hometown:         input.Hometown,
-		MainCity:         input.MainCity,
+		Nickname:            input.Nickname,
+		PreferredName:       input.PreferredName,
+		Gender:              input.Gender,
+		BirthYear:           input.BirthYear,
+		Hometown:            input.Hometown,
+		MainCity:            input.MainCity,
 		OnboardingCompleted: input.OnboardingCompleted,
-		IsActive:         input.IsActive,
+		IsActive:            input.IsActive,
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -448,6 +452,58 @@ func (h *Handler) GetUserStats(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// RegenerateUserTopicPool 管理员为指定用户重建话题池
+func (h *Handler) RegenerateUserTopicPool(c *gin.Context) {
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	u, err := h.userService.GetByID(ctx, userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, userService.ErrUserNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.flowService.RegenerateTopicPoolForUser(ctx, userID, 5); err != nil {
+		if strings.Contains(err.Error(), "has no memoirs") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "用户还没有足够的回忆内容，暂时无法生成话题池"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	topicPool, err := h.topicService.GetTopicOptions(ctx, userID, 100)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	_ = h.auditService.Log(ctx, audit.CreateInput{
+		Action:      audit.ActionEditTopic,
+		TargetType:  audit.TargetTypeUser,
+		TargetID:    &userID,
+		TargetLabel: u.Phone,
+		Detail: map[string]any{
+			"operation":   "regenerate_topic_pool",
+			"topic_count": len(topicPool),
+		},
+		IPAddress: c.ClientIP(),
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "话题池已重新生成",
+		"topic_pool": topicPool,
+	})
+}
+
 // --- 对话管理 ---
 
 // ListConversations 获取对话列表
@@ -624,11 +680,14 @@ func (h *Handler) RegenerateMemoir(c *gin.Context) {
 
 	// 调用 LLM 重新生成
 	result, err := h.llmService.GenerateMemoir(ctx, &llmService.GenerateMemoirInput{
-		UserName:     user.DisplayName(),
-		BirthYear:    user.BirthYear,
-		Hometown:     derefString(user.Hometown),
-		Topic:        derefString(conv.Topic),
-		Conversation: conversationText,
+		UserName:            user.DisplayName(),
+		BirthYear:           user.BirthYear,
+		Hometown:            derefString(user.Hometown),
+		StoryMemory:         derefString(user.StoryMemory),
+		Topic:               derefString(conv.Topic),
+		MemoirTheme:         fallbackAdminString(derefString(conv.Topic), "本次对话中的主要经历"),
+		CoverageSummary:     "围绕这次对话中的主要经历，忠实整理用户明确讲过的重要内容",
+		ConversationExcerpt: conversationText,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate memoir: " + err.Error()})
@@ -657,6 +716,13 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func fallbackAdminString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }
 
 // --- 话题管理 ---

@@ -139,6 +139,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		deps.MemoirService,
 		deps.TopicService,
 		deps.QuoteService,
+		deps.FlowService,
 		deps.LLMService,
 		deps.EraService,
 		deps.PresetService,
@@ -155,6 +156,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		adminRoutes.POST("/users", adminHandler.CreateUser)
 		adminRoutes.GET("/users/:id", adminHandler.GetUser)
 		adminRoutes.GET("/users/:id/stats", adminHandler.GetUserStats)
+		adminRoutes.POST("/users/:id/regenerate-topic-pool", adminHandler.RegenerateUserTopicPool)
 		adminRoutes.PUT("/users/:id", adminHandler.UpdateUser)
 		adminRoutes.DELETE("/users/:id", adminHandler.DeleteUser)
 		adminRoutes.POST("/users/:id/reset-password", adminHandler.ResetPassword)
