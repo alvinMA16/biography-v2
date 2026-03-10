@@ -372,11 +372,13 @@ func (s *Session) finishUserTurn() error {
 	)
 
 	// 模型通过 JSON 协议返回文本或结束指令
-	resp, err := provider.Chat(s.ctx, inferenceMessages)
-
+	resp, usedProvider, err := s.llmManager.ChatWithRetry(s.ctx, inferenceMessages, 3)
 	if err != nil {
 		s.setState(StateListening, "LLM 调用失败")
 		return fmt.Errorf("LLM chat: %w", err)
+	}
+	if usedProvider != provider.Name() {
+		log.Printf("[Session] LLM 实际使用 provider=%s", usedProvider)
 	}
 
 	assistantText := strings.TrimSpace(resp.Content)

@@ -304,7 +304,25 @@ func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *co
 	})
 	if err != nil {
 		log.Printf("[Flow] 生成回忆录内容失败: %v", err)
-		return nil
+		fallbackTitle := "一段对话记录"
+		if topicTitle != "" {
+			fallbackTitle = topicTitle
+		}
+
+		fallbackInput := &memoir.CreateMemoirInput{
+			ConversationID: &conv.ID,
+			Title:          fallbackTitle,
+			Content:        strings.TrimSpace(conversationText),
+		}
+
+		m, createErr := s.memoirService.Create(ctx, u.ID, fallbackInput)
+		if createErr != nil {
+			log.Printf("[Flow] 创建原始对话记录失败: %v", createErr)
+			return nil
+		}
+
+		log.Printf("[Flow] 已回退创建原始对话记录: %s", m.Title)
+		return m
 	}
 
 	// 创建回忆录

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 )
 
@@ -65,6 +66,32 @@ func (m *Manager) Chat(ctx context.Context, messages []Message) (*Response, erro
 		return nil, err
 	}
 	return provider.Chat(ctx, messages)
+}
+
+// ChatWithRetry 使用主要提供者进行对话，失败时有限重试
+func (m *Manager) ChatWithRetry(ctx context.Context, messages []Message, attempts int) (*Response, string, error) {
+	if attempts <= 0 {
+		attempts = 1
+	}
+
+	provider, err := m.Primary()
+	if err != nil {
+		return nil, "", err
+	}
+
+	var lastErr error
+	for i := 1; i <= attempts; i++ {
+		resp, err := provider.Chat(ctx, messages)
+		if err == nil {
+			return resp, provider.Name(), nil
+		}
+		lastErr = err
+		if i < attempts {
+			log.Printf("[LLM] provider=%s chat failed, retrying (%d/%d): %v", provider.Name(), i, attempts, err)
+		}
+	}
+
+	return nil, provider.Name(), lastErr
 }
 
 // ChatStream 使用主要提供者进行流式对话

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"strings"
 	"text/template"
 
@@ -54,8 +55,7 @@ func (s *Service) GenerateMemoir(ctx context.Context, input *GenerateMemoirInput
 		return nil, ErrEmptyInput
 	}
 
-	provider, err := s.manager.Primary()
-	if err != nil {
+	if _, err := s.manager.Primary(); err != nil {
 		return nil, ErrLLMNotAvailable
 	}
 
@@ -76,27 +76,34 @@ func (s *Service) GenerateMemoir(ctx context.Context, input *GenerateMemoirInput
 		return nil, err
 	}
 
-	// 调用 LLM
-	resp, err := provider.Chat(ctx, []llm.Message{
-		{Role: "user", Content: promptText},
-	})
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		resp, providerName, err := s.manager.ChatWithRetry(ctx, []llm.Message{
+			{Role: "user", Content: promptText},
+		}, 1)
+		if err != nil {
+			lastErr = err
+			log.Printf("[LLM] GenerateMemoir failed (attempt %d/3 provider=%s): %v", attempt, providerName, err)
+			continue
+		}
+
+		var output GenerateMemoirOutput
+		if err := parseJSONResponse(resp.Content, &output); err != nil {
+			lastErr = err
+			log.Printf("[LLM] GenerateMemoir invalid response (attempt %d/3 provider=%s): %s", attempt, providerName, truncateForLog(resp.Content, 1000))
+			continue
+		}
+
+		return &memoir.GeneratedMemoir{
+			Title:      output.Title,
+			Content:    output.Content,
+			TimePeriod: output.TimePeriod,
+			StartYear:  output.StartYear,
+			EndYear:    output.EndYear,
+		}, nil
 	}
 
-	// 解析响应
-	var output GenerateMemoirOutput
-	if err := parseJSONResponse(resp.Content, &output); err != nil {
-		return nil, err
-	}
-
-	return &memoir.GeneratedMemoir{
-		Title:      output.Title,
-		Content:    output.Content,
-		TimePeriod: output.TimePeriod,
-		StartYear:  output.StartYear,
-		EndYear:    output.EndYear,
-	}, nil
+	return nil, lastErr
 }
 
 // GenerateTopicsInput 生成话题输入
@@ -310,4 +317,12 @@ func parseJSONResponse(content string, v interface{}) error {
 	}
 
 	return nil
+}
+
+func truncateForLog(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
