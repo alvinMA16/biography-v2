@@ -8,9 +8,9 @@ import (
 
 // User 用户实体
 type User struct {
-	ID           uuid.UUID  `json:"id" db:"id"`
-	Phone        string     `json:"phone" db:"phone"`
-	PasswordHash string     `json:"-" db:"password_hash"`
+	ID           uuid.UUID `json:"id" db:"id"`
+	Phone        string    `json:"phone" db:"phone"`
+	PasswordHash string    `json:"-" db:"password_hash"`
 
 	// 基本信息
 	Nickname      *string `json:"nickname" db:"nickname"`
@@ -22,10 +22,11 @@ type User struct {
 
 	// 状态
 	OnboardingCompleted bool    `json:"onboarding_completed" db:"onboarding_completed"` // 首次对话是否完成
-	EraMemories       *string `json:"era_memories" db:"era_memories"`
-	EraMemoriesStatus string  `json:"era_memories_status" db:"era_memories_status"` // none/pending/generating/completed/failed
-	IsAdmin           bool    `json:"is_admin" db:"is_admin"`
-	IsActive          bool    `json:"is_active" db:"is_active"`
+	EraMemories         *string `json:"era_memories" db:"era_memories"`
+	StoryMemory         *string `json:"story_memory" db:"story_memory"`
+	EraMemoriesStatus   string  `json:"era_memories_status" db:"era_memories_status"` // none/pending/generating/completed/failed
+	IsAdmin             bool    `json:"is_admin" db:"is_admin"`
+	IsActive            bool    `json:"is_active" db:"is_active"`
 
 	// 设置（JSON）
 	Settings *UserSettings `json:"settings" db:"settings"` // 用户偏好设置
@@ -129,8 +130,8 @@ type UpdateSettingsInput struct {
 
 // ExportData 用户数据导出结构
 type ExportData struct {
-	Profile       *User                  `json:"profile"`
-	Conversations []map[string]any       `json:"conversations"`
-	Memoirs       []map[string]any       `json:"memoirs"`
-	ExportedAt    string                 `json:"exported_at"`
+	Profile       *User            `json:"profile"`
+	Conversations []map[string]any `json:"conversations"`
+	Memoirs       []map[string]any `json:"memoirs"`
+	ExportedAt    string           `json:"exported_at"`
 }

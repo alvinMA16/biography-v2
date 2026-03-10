@@ -1382,6 +1382,8 @@ function renderUserDetail(detail) {
 
     // 时代记忆
     renderEraMemory(detail.era_memories);
+    renderStoryMemory(detail.story_memory);
+    renderConversationSummaries(detail.conversations || []);
 
     // 头部操作按钮
     const isActive = detail.is_active !== false;
@@ -1535,6 +1537,61 @@ function toggleEraMemory() {
 
     content.style.display = isHidden ? 'block' : 'none';
     toggle.textContent = isHidden ? '收起' : '展开';
+}
+
+function renderStoryMemory(storyMemory) {
+    const card = document.getElementById('storyMemoryCard');
+    const content = document.getElementById('storyMemoryContent');
+    const text = document.getElementById('storyMemoryText');
+
+    if (!storyMemory) {
+        card.style.display = 'none';
+        return;
+    }
+
+    card.style.display = 'block';
+    text.textContent = storyMemory;
+    content.style.display = 'none';
+    document.getElementById('storyMemoryToggle').textContent = '展开';
+}
+
+function toggleStoryMemory() {
+    const content = document.getElementById('storyMemoryContent');
+    const toggle = document.getElementById('storyMemoryToggle');
+    const isHidden = content.style.display === 'none';
+
+    content.style.display = isHidden ? 'block' : 'none';
+    toggle.textContent = isHidden ? '收起' : '展开';
+}
+
+function renderConversationSummaries(conversations) {
+    const container = document.getElementById('conversationSummaryContainer');
+    const summaries = (conversations || [])
+        .filter(c => c.summary && c.summary.trim())
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+    document.getElementById('conversationSummaryCount').textContent = summaries.length;
+
+    if (!summaries.length) {
+        container.innerHTML = '<div class="admin-empty-state">暂无摘要</div>';
+        return;
+    }
+
+    container.innerHTML = `<div class="admin-summary-list">
+        ${summaries.map((c, index) => {
+            const title = c.topic || c.title || `第${index + 1}段对话`;
+            const time = c.created_at ? formatDate(c.created_at) : '';
+            return `
+                <div class="admin-summary-item">
+                    <div class="admin-summary-item-header">
+                        <div class="admin-summary-title">${escapeHtml(title)}</div>
+                        <div class="admin-summary-time">${escapeHtml(time)}</div>
+                    </div>
+                    <div class="admin-summary-text">${escapeHtml(c.summary)}</div>
+                </div>
+            `;
+        }).join('')}
+    </div>`;
 }
 
 function calculateActiveDays(conversations) {

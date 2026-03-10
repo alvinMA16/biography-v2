@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 
 	"github.com/peizhengma/biography-v2/internal/domain/memoir"
 	"github.com/peizhengma/biography-v2/internal/domain/topic"
@@ -112,22 +113,21 @@ type GenerateTopicsInput struct {
 	BirthYear       *int
 	Hometown        string
 	MainCity        string
-	EraMemories     string
+	UserMemory      string
+	MemoirSummaries string
 	ExistingTopics  []string
-	ExistingMemoirs []string
 	Count           int
 }
 
 // GenerateTopics 生成话题
 func (s *Service) GenerateTopics(ctx context.Context, input *GenerateTopicsInput) ([]topic.GeneratedTopic, error) {
-	provider, err := s.manager.Primary()
-	if err != nil {
+	if _, err := s.manager.Primary(); err != nil {
 		return nil, ErrLLMNotAvailable
 	}
 
 	count := input.Count
 	if count <= 0 {
-		count = 5
+		count = 4
 	}
 
 	birthYear := 0
@@ -140,9 +140,14 @@ func (s *Service) GenerateTopics(ctx context.Context, input *GenerateTopicsInput
 		existingTopics = strings.Join(input.ExistingTopics, "、")
 	}
 
-	existingMemoirs := "无"
-	if len(input.ExistingMemoirs) > 0 {
-		existingMemoirs = strings.Join(input.ExistingMemoirs, "、")
+	userMemory := strings.TrimSpace(input.UserMemory)
+	if userMemory == "" {
+		userMemory = "暂无"
+	}
+
+	memoirSummaries := strings.TrimSpace(input.MemoirSummaries)
+	if memoirSummaries == "" {
+		memoirSummaries = "暂无"
 	}
 
 	promptText, err := renderTemplate(prompt.TopicPrompt, map[string]interface{}{
@@ -150,28 +155,98 @@ func (s *Service) GenerateTopics(ctx context.Context, input *GenerateTopicsInput
 		"BirthYear":       birthYear,
 		"Hometown":        input.Hometown,
 		"MainCity":        input.MainCity,
-		"EraMemories":     input.EraMemories,
+		"UserMemory":      userMemory,
+		"MemoirSummaries": memoirSummaries,
 		"ExistingTopics":  existingTopics,
-		"ExistingMemoirs": existingMemoirs,
 		"Count":           count,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := provider.Chat(ctx, []llm.Message{
+	resp, providerName, err := s.manager.ChatWithRetry(ctx, []llm.Message{
 		{Role: "user", Content: promptText},
-	})
+	}, 3)
 	if err != nil {
 		return nil, err
 	}
 
 	var topics []topic.GeneratedTopic
 	if err := parseJSONResponse(resp.Content, &topics); err != nil {
+		log.Printf("[LLM] GenerateTopics invalid response (provider=%s): %s", providerName, truncateForLog(resp.Content, 1000))
 		return nil, err
 	}
 
 	return topics, nil
+}
+
+// GenerateStoryMemoryInput 生成用户长期记忆输入
+type GenerateStoryMemoryInput struct {
+	UserName        string
+	BirthYear       *int
+	Hometown        string
+	MainCity        string
+	ExistingMemory  string
+	MemoirSummaries string
+	Conversation    string
+}
+
+// GenerateStoryMemory 生成用户长期记忆
+func (s *Service) GenerateStoryMemory(ctx context.Context, input *GenerateStoryMemoryInput) (string, error) {
+	if strings.TrimSpace(input.Conversation) == "" {
+		return "", ErrEmptyInput
+	}
+
+	if _, err := s.manager.Primary(); err != nil {
+		return "", ErrLLMNotAvailable
+	}
+
+	birthYear := 0
+	if input.BirthYear != nil {
+		birthYear = *input.BirthYear
+	}
+
+	existingMemory := strings.TrimSpace(input.ExistingMemory)
+	if existingMemory == "" {
+		existingMemory = "暂无"
+	}
+
+	memoirSummaries := strings.TrimSpace(input.MemoirSummaries)
+	if memoirSummaries == "" {
+		memoirSummaries = "暂无"
+	}
+
+	promptText, err := renderTemplate(prompt.StoryMemoryPrompt, map[string]interface{}{
+		"UserName":        input.UserName,
+		"BirthYear":       birthYear,
+		"Hometown":        input.Hometown,
+		"MainCity":        input.MainCity,
+		"ExistingMemory":  existingMemory,
+		"MemoirSummaries": memoirSummaries,
+		"Conversation":    input.Conversation,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	resp, providerName, err := s.manager.ChatWithRetry(ctx, []llm.Message{
+		{Role: "user", Content: promptText},
+	}, 3)
+	if err != nil {
+		return "", err
+	}
+
+	memory := strings.TrimSpace(resp.Content)
+	if memory == "" {
+		return "", ErrInvalidResponse
+	}
+
+	if utf8.RuneCountInString(memory) > 800 {
+		memory = truncateRunes(memory, 800)
+	}
+
+	log.Printf("[LLM] GenerateStoryMemory success (provider=%s len=%d)", providerName, utf8.RuneCountInString(memory))
+	return memory, nil
 }
 
 // GenerateSummary 生成对话摘要
@@ -325,4 +400,21 @@ func truncateForLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 || utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+
+	var b strings.Builder
+	count := 0
+	for _, r := range s {
+		if count >= maxRunes {
+			break
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return strings.TrimSpace(b.String())
 }

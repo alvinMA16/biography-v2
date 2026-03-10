@@ -604,7 +604,7 @@ func (h *Handler) GetTopicOptions(c *gin.Context) {
 	}
 
 	// 解析数量参数
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "8"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
 
 	// 先获取用户个性化话题
 	options, err := h.topicService.GetTopicOptions(c.Request.Context(), userID, limit)

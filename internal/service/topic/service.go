@@ -151,7 +151,7 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, status *topic.Stat
 // GetTopicOptions 获取可选话题（用于前端展示）
 func (s *Service) GetTopicOptions(ctx context.Context, userID uuid.UUID, limit int) ([]topic.TopicOption, error) {
 	if limit <= 0 {
-		limit = 8
+		limit = 5
 	}
 
 	topics, err := s.repo.GetAvailableTopics(ctx, userID, limit)

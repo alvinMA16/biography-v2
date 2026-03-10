@@ -713,6 +713,30 @@
                             </div>
                         </div>
 
+                        <!-- 长期记忆 -->
+                        <div class="admin-card admin-era-memory-card" id="storyMemoryCard" style="display:none;">
+                            <div class="admin-card-header">
+                                <h3>长期记忆</h3>
+                                <button class="admin-btn admin-btn-sm admin-btn-link" onclick="toggleStoryMemory()">
+                                    <span id="storyMemoryToggle">展开</span>
+                                </button>
+                            </div>
+                            <div class="admin-card-body" id="storyMemoryContent" style="display:none;">
+                                <div class="admin-era-memory-text" id="storyMemoryText">-</div>
+                            </div>
+                        </div>
+
+                        <!-- 对话摘要 -->
+                        <div class="admin-card admin-summary-card">
+                            <div class="admin-card-header">
+                                <h3>对话摘要</h3>
+                                <span class="admin-count-badge" id="conversationSummaryCount">0</span>
+                            </div>
+                            <div class="admin-card-body" id="conversationSummaryContainer">
+                                <div class="admin-empty-state">暂无摘要</div>
+                            </div>
+                        </div>
+
                         <!-- 回忆时间线 -->
                         <div class="admin-card admin-memoir-timeline-card">
                             <div class="admin-card-header">

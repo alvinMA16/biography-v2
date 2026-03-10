@@ -232,6 +232,11 @@ func (s *Service) UpdateEraMemoriesStatus(ctx context.Context, userID uuid.UUID,
 	return s.repo.UpdateEraMemoriesStatus(ctx, userID, status)
 }
 
+// UpdateStoryMemory 更新用户长期记忆
+func (s *Service) UpdateStoryMemory(ctx context.Context, userID uuid.UUID, storyMemory string) error {
+	return s.repo.UpdateStoryMemory(ctx, userID, storyMemory)
+}
+
 // ============================================
 // Admin 方法
 // ============================================
