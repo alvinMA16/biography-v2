@@ -2,6 +2,7 @@
 const API_BASE = '/api';
 let adminKey = '';
 let usersData = [];
+let filteredUsersData = [];
 let logsLoaded = false;
 
 // ========== Admin Key 验证 ==========
@@ -132,35 +133,95 @@ function switchTab(tab) {
 // ========== 用户列表 ==========
 
 async function loadUsers() {
-    const data = await adminRequest('/admin/users');
+    const data = await adminRequest('/admin/users?limit=500&offset=0');
     usersData = data.users || [];
-    renderUserTable(usersData);
+    applyUserFilters();
+}
+
+function getFirstSessionStatus(user) {
+    if (user.onboarding_completed) {
+        return { key: 'completed', label: '已完成', className: 'badge-yes' };
+    }
+    if ((user.conversation_count ?? 0) > 0) {
+        return { key: 'started', label: '进行中', className: 'badge-warn' };
+    }
+    return { key: 'not_started', label: '未开始', className: 'badge-no' };
+}
+
+function updateUserTableSummary(filtered, total) {
+    const el = document.getElementById('userTableSummary');
+    if (!el) return;
+    if (filtered === total) {
+        el.textContent = `共 ${total} 位用户`;
+        return;
+    }
+    el.textContent = `筛选后 ${filtered} / ${total} 位用户`;
+}
+
+function applyUserFilters() {
+    const keyword = (document.getElementById('userSearchInput')?.value || '').trim().toLowerCase();
+    const firstSessionFilter = document.getElementById('userFirstSessionFilter')?.value || '';
+    const accountFilter = document.getElementById('userAccountFilter')?.value || '';
+    const memoirFilter = document.getElementById('userMemoirFilter')?.value || '';
+
+    filteredUsersData = usersData.filter(u => {
+        const phone = (u.phone || '').toLowerCase();
+        const nickname = (u.nickname || '').toLowerCase();
+        if (keyword && !phone.includes(keyword) && !nickname.includes(keyword)) {
+            return false;
+        }
+
+        const firstSessionStatus = getFirstSessionStatus(u).key;
+        if (firstSessionFilter && firstSessionStatus !== firstSessionFilter) {
+            return false;
+        }
+
+        const isActive = u.is_active !== false;
+        if (accountFilter === 'active' && !isActive) {
+            return false;
+        }
+        if (accountFilter === 'inactive' && isActive) {
+            return false;
+        }
+
+        const memoirCount = u.memoir_count ?? 0;
+        if (memoirFilter === 'with_memoir' && memoirCount <= 0) {
+            return false;
+        }
+        if (memoirFilter === 'without_memoir' && memoirCount > 0) {
+            return false;
+        }
+
+        return true;
+    });
+
+    updateUserTableSummary(filteredUsersData.length, usersData.length);
+    renderUserTable(filteredUsersData);
 }
 
 function renderUserTable(users) {
     const tbody = document.getElementById('userTableBody');
     if (!users.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="admin-table-empty">暂无用户</td></tr>';
+        const emptyText = usersData.length ? '没有匹配的用户' : '暂无用户';
+        tbody.innerHTML = `<tr><td colspan="8" class="admin-table-empty">${emptyText}</td></tr>`;
         return;
     }
     tbody.innerHTML = users.map(u => {
         const isActive = u.is_active !== false;
+        const firstSession = getFirstSessionStatus(u);
         const label = (u.phone || u.nickname || '').replace(/'/g, "\\'");
         return `
         <tr${!isActive ? ' class="admin-row-disabled"' : ''}>
             <td>${u.phone || '-'}</td>
             <td>${u.nickname || '<span class="text-muted">-</span>'}</td>
-            <td>${u.birth_year || '<span class="text-muted">-</span>'}</td>
-            <td><span class="admin-badge ${u.onboarding_completed ? 'badge-yes' : 'badge-no'}">${u.onboarding_completed ? '已完成' : '未开始'}</span></td>
+            <td><span class="admin-badge ${firstSession.className}">${firstSession.label}</span></td>
             <td><span class="admin-badge ${isActive ? 'badge-yes' : 'badge-no'}">${isActive ? '正常' : '已禁用'}</span></td>
-            <td>${u.conversation_count ?? 0} / ${u.memoir_count ?? 0}</td>
+            <td>${u.conversation_count ?? 0}</td>
+            <td>${u.memoir_count ?? 0}</td>
             <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('zh-CN') : '-'}</td>
             <td class="admin-actions-cell">
                 <button class="admin-btn admin-btn-sm admin-btn-primary" onclick="viewUserDetail('${u.id}')">详情</button>
-                <button class="admin-btn admin-btn-sm" onclick="showEditModal('${u.id}')">编辑</button>
                 <button class="admin-btn admin-btn-sm ${isActive ? 'admin-btn-warn' : ''}" onclick="toggleUserActive('${u.id}', '${label}')">${isActive ? '禁用' : '启用'}</button>
-                <button class="admin-btn admin-btn-sm admin-btn-danger" onclick="deleteUser('${u.id}', '${label}')">删除</button>
-                <button class="admin-btn admin-btn-sm" onclick="resetPassword('${u.id}', '${label}')">重置密码</button>
             </td>
         </tr>`;
     }).join('');
@@ -323,6 +384,9 @@ async function deleteUser(userId, label) {
         await adminRequest(`/admin/users/${userId}`, {
             method: 'DELETE',
         });
+        if (currentUserDetail && currentUserDetail.id === userId) {
+            backToUserList();
+        }
         await loadUsers();
         logsLoaded = false;
     } catch (e) {
@@ -1270,8 +1334,12 @@ function renderUserDetail(detail) {
     // 状态徽章
     document.getElementById('detailStatusBadge').className = `admin-badge ${detail.is_active ? 'badge-yes' : 'badge-no'}`;
     document.getElementById('detailStatusBadge').textContent = detail.is_active ? '正常' : '已禁用';
-    document.getElementById('detailProfileBadge').className = `admin-badge ${detail.onboarding_completed ? 'badge-yes' : 'badge-no'}`;
-    document.getElementById('detailProfileBadge').textContent = detail.onboarding_completed ? '首次对话已完成' : '首次对话未开始';
+    const firstSession = getFirstSessionStatus(detail);
+    document.getElementById('detailProfileBadge').className = `admin-badge ${firstSession.className}`;
+    document.getElementById('detailProfileBadge').textContent =
+        firstSession.key === 'completed'
+            ? '首次对话已完成'
+            : (firstSession.key === 'started' ? '首次对话进行中' : '首次对话未开始');
 
     // 统计数据
     document.getElementById('detailConvCount').textContent = detail.conversations ? detail.conversations.length : 0;
@@ -1304,6 +1372,7 @@ function renderUserDetail(detail) {
     const conversations = detail.conversations || [];
     document.getElementById('memoirCount').textContent = memoirs.length;
     renderMemoirList(memoirs, conversations);
+    renderUserHealthSummary(detail);
 
     // 使用统计
     renderUserStats(detail.stats);
@@ -1320,7 +1389,45 @@ function renderUserDetail(detail) {
     document.getElementById('userDetailActions').innerHTML = `
         <button class="admin-btn admin-btn-sm" onclick="showEditModal('${detail.id}')">编辑</button>
         <button class="admin-btn admin-btn-sm ${isActive ? 'admin-btn-warn' : ''}" onclick="toggleUserActive('${detail.id}', '${label}')">${isActive ? '禁用' : '启用'}</button>
+        <button class="admin-btn admin-btn-sm" onclick="resetPassword('${detail.id}', '${label}')">重置密码</button>
+        <button class="admin-btn admin-btn-sm admin-btn-danger" onclick="deleteUser('${detail.id}', '${label}')">删除用户</button>
     `;
+}
+
+function renderUserHealthSummary(detail) {
+    const conversations = detail.conversations || [];
+    const memoirs = detail.memoirs || [];
+    const isActive = detail.is_active !== false;
+    const firstSession = getFirstSessionStatus(detail);
+
+    let stageText = '已进入正式使用';
+    if (firstSession.key === 'not_started') {
+        stageText = '还没开始首次对话';
+    } else if (firstSession.key === 'started') {
+        stageText = '首次对话还没走完';
+    }
+
+    let contentStatus = '内容沉淀正常';
+    if (conversations.length === 0) {
+        contentStatus = '还没有任何对话';
+    } else if (memoirs.length === 0) {
+        contentStatus = '已有对话，暂时没有回忆录';
+    }
+
+    let recommendedAction = '当前状态稳定，优先观察后续活跃情况。';
+    if (!isActive) {
+        recommendedAction = '账号当前已禁用，如需恢复使用，先确认原因再启用。';
+    } else if (firstSession.key === 'not_started') {
+        recommendedAction = '建议优先引导用户完成首次对话，先让他顺利留下第一段故事。';
+    } else if (firstSession.key === 'started') {
+        recommendedAction = '用户已经开始说了，建议关注首次对话为什么没有自然收尾。';
+    } else if (conversations.length > 0 && memoirs.length === 0) {
+        recommendedAction = '已有聊天但没有内容沉淀，建议检查回忆录生成链路。';
+    }
+
+    document.getElementById('detailJourneyStage').textContent = stageText;
+    document.getElementById('detailContentStatus').textContent = contentStatus;
+    document.getElementById('detailRecommendedAction').textContent = recommendedAction;
 }
 
 function renderUserStats(stats) {

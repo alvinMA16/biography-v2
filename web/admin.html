@@ -71,21 +71,49 @@
                 <!-- 用户管理 Tab -->
                 <div id="tabUsers" class="admin-tab-panel active">
                     <header class="admin-panel-header">
-                        <h1>用户管理</h1>
-                        <button class="btn btn-primary" onclick="showCreateModal()">新建用户</button>
+                        <div class="admin-header-left">
+                            <h1>用户管理</h1>
+                        </div>
+                        <button class="btn" onclick="showCreateModal()">新建用户</button>
                     </header>
                     <div class="admin-panel-content">
+                        <div class="admin-filter-bar admin-user-toolbar">
+                            <input
+                                type="text"
+                                id="userSearchInput"
+                                class="admin-input admin-user-search"
+                                placeholder="搜索手机号或昵称"
+                                oninput="applyUserFilters()"
+                            >
+                            <select id="userFirstSessionFilter" class="admin-input" onchange="applyUserFilters()">
+                                <option value="">首次对话：全部</option>
+                                <option value="completed">已完成</option>
+                                <option value="started">进行中</option>
+                                <option value="not_started">未开始</option>
+                            </select>
+                            <select id="userAccountFilter" class="admin-input" onchange="applyUserFilters()">
+                                <option value="">账号状态：全部</option>
+                                <option value="active">正常</option>
+                                <option value="inactive">已禁用</option>
+                            </select>
+                            <select id="userMemoirFilter" class="admin-input" onchange="applyUserFilters()">
+                                <option value="">回忆录：全部</option>
+                                <option value="with_memoir">有回忆录</option>
+                                <option value="without_memoir">无回忆录</option>
+                            </select>
+                            <span id="userTableSummary" class="admin-toolbar-summary">共 0 位用户</span>
+                        </div>
                         <div class="admin-card">
                             <table class="admin-table">
                                 <thead>
                                     <tr>
                                         <th>手机号</th>
                                         <th>昵称</th>
-                                        <th>出生年份</th>
                                         <th>首次对话</th>
                                         <th>账号状态</th>
-                                        <th>对话/回忆</th>
-                                        <th>创建时间</th>
+                                        <th>对话数</th>
+                                        <th>回忆录</th>
+                                        <th>加入时间</th>
                                         <th>操作</th>
                                     </tr>
                                 </thead>
@@ -456,6 +484,28 @@
                                 <div class="admin-profile-stat">
                                     <div class="stat-value" id="detailDaysActive">0</div>
                                     <div class="stat-label">活跃天数</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="admin-card admin-user-health-card">
+                            <div class="admin-card-header">
+                                <h3>状态摘要</h3>
+                            </div>
+                            <div class="admin-card-body">
+                                <div class="admin-health-grid">
+                                    <div class="admin-health-item">
+                                        <div class="admin-health-label">当前阶段</div>
+                                        <div class="admin-health-value" id="detailJourneyStage">-</div>
+                                    </div>
+                                    <div class="admin-health-item">
+                                        <div class="admin-health-label">内容状态</div>
+                                        <div class="admin-health-value" id="detailContentStatus">-</div>
+                                    </div>
+                                    <div class="admin-health-item admin-health-item-wide">
+                                        <div class="admin-health-label">建议动作</div>
+                                        <div class="admin-health-value" id="detailRecommendedAction">-</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

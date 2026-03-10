@@ -5,14 +5,6 @@ const DEBUG_MODE = window.location.hostname === 'localhost' || window.location.h
 
 // ========== 动态欢迎语 ==========
 
-const WELCOME_MESSAGES = [
-    '不用等到什么"大事"，先写下一小段就很好。',
-    '有些细节趁现在还清楚，记下来就不怕它慢慢淡掉。',
-    '别让你的故事只躺在相册和聊天记录里，我们把它慢慢收进回忆录。',
-    '很多当时觉得普通的瞬间，后来回头看才发现特别珍贵。',
-    '如果哪天你想不起细节了也没关系，这里会替你把它们留着。',
-];
-
 const GENERAL_GREETINGS = ['你好呀', '嗨', '您好', '你好'];
 
 function getTimeGreeting() {
@@ -54,16 +46,21 @@ function updateWelcomeText(profile, messages) {
     const name = getDisplayName(profile);
     const greetWord = getGreeting();
     const greeting = name ? `${greetWord}，${name}。` : `${greetWord}。`;
-    const pool = (messages && messages.length > 0) ? messages : WELCOME_MESSAGES.map(c => ({ content: c, show_greeting: true }));
-    const picked = pool[Math.floor(Math.random() * pool.length)];
-    const content = typeof picked === 'string' ? picked : picked.content;
-    const showGreeting = typeof picked === 'string' ? true : picked.show_greeting !== false;
+    if (!messages || messages.length === 0) {
+        container.innerHTML = `<p>${greeting}</p>`;
+        return;
+    }
+
+    const picked = messages[Math.floor(Math.random() * messages.length)];
+    const content = picked.content;
+    const showGreeting = picked.show_greeting !== false;
 
     if (showGreeting) {
         container.innerHTML = `<p>${greeting}</p><p style="white-space:pre-line">${content}</p>`;
-    } else {
-        container.innerHTML = `<p style="white-space:pre-line">${content}</p>`;
+        return;
     }
+
+    container.innerHTML = `<p style="white-space:pre-line">${content}</p>`;
 }
 
 // 初始化应用
@@ -89,7 +86,7 @@ async function initApp() {
     try {
         const profile = await api.user.getProfile();
 
-        // 动态加载激励语，失败时使用硬编码 fallback
+        // 动态加载激励语；没有就只显示问候语
         let welcomeMessages = null;
         try {
             const msgs = await api.user.getWelcomeMessages();
@@ -97,7 +94,7 @@ async function initApp() {
                 welcomeMessages = msgs.map(m => ({ content: m.content, show_greeting: m.show_greeting }));
             }
         } catch (e) {
-            console.warn('加载激励语失败，使用默认文案:', e);
+            console.warn('加载激励语失败，将只显示问候语:', e);
         }
 
         // 更新欢迎语
