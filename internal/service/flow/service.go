@@ -303,6 +303,7 @@ func (s *Service) autoGenerateMemoir(ctx context.Context, u *user.User, conv *co
 		UserName:     u.DisplayName(),
 		BirthYear:    u.BirthYear,
 		Hometown:     derefString(u.Hometown),
+		StoryMemory:  derefString(u.StoryMemory),
 		Topic:        topicTitle,
 		Conversation: conversationText,
 	})

@@ -37,6 +37,7 @@ type GenerateMemoirInput struct {
 	UserName     string
 	BirthYear    *int
 	Hometown     string
+	StoryMemory  string
 	Topic        string
 	Conversation string
 }
@@ -70,6 +71,7 @@ func (s *Service) GenerateMemoir(ctx context.Context, input *GenerateMemoirInput
 		"UserName":     input.UserName,
 		"BirthYear":    birthYear,
 		"Hometown":     input.Hometown,
+		"StoryMemory":  fallbackText(input.StoryMemory, "暂无"),
 		"Topic":        input.Topic,
 		"Conversation": input.Conversation,
 	})
@@ -417,4 +419,11 @@ func truncateRunes(s string, maxRunes int) string {
 		count++
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func fallbackText(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
