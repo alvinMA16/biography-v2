@@ -671,21 +671,20 @@ async function loadWelcomeMessages() {
         renderWelcomeMessageTable(welcomeMessagesData);
     } catch (e) {
         document.getElementById('welcomeMessageTableBody').innerHTML =
-            '<tr><td colspan="5" class="admin-table-empty">加载失败</td></tr>';
+            '<tr><td colspan="4" class="admin-table-empty">加载失败</td></tr>';
     }
 }
 
 function renderWelcomeMessageTable(messages) {
     const tbody = document.getElementById('welcomeMessageTableBody');
     if (!messages.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="admin-table-empty">暂无激励语</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="admin-table-empty">暂无激励语</td></tr>';
         return;
     }
     tbody.innerHTML = messages.map(m => `
         <tr${!m.is_active ? ' class="admin-row-disabled"' : ''}>
             <td>${escapeHtml(m.content)}</td>
             <td><span class="admin-badge ${m.show_greeting !== false ? 'badge-yes' : 'badge-no'}">${m.show_greeting !== false ? '显示' : '隐藏'}</span></td>
-            <td>${m.sort_order}</td>
             <td><span class="admin-badge ${m.is_active ? 'badge-yes' : 'badge-no'}">${m.is_active ? '启用' : '禁用'}</span></td>
             <td class="admin-actions-cell">
                 <button class="admin-btn admin-btn-sm" onclick="editWelcomeMessage('${m.id}')">编辑</button>
@@ -700,7 +699,6 @@ function showWelcomeMessageModal() {
     document.getElementById('welcomeMessageModalTitle').textContent = '新增激励语';
     document.getElementById('welcomeMessageId').value = '';
     document.getElementById('welcomeMessageContent').value = '';
-    document.getElementById('welcomeMessageSortOrder').value = '0';
     document.getElementById('welcomeMessageShowGreeting').checked = true;
     document.getElementById('welcomeMessageModal').style.display = 'flex';
     document.getElementById('welcomeMessageContent').focus();
@@ -713,7 +711,6 @@ function editWelcomeMessage(id) {
     document.getElementById('welcomeMessageModalTitle').textContent = '编辑激励语';
     document.getElementById('welcomeMessageId').value = id;
     document.getElementById('welcomeMessageContent').value = msg.content;
-    document.getElementById('welcomeMessageSortOrder').value = msg.sort_order;
     document.getElementById('welcomeMessageShowGreeting').checked = msg.show_greeting !== false;
     document.getElementById('welcomeMessageModal').style.display = 'flex';
     document.getElementById('welcomeMessageContent').focus();
@@ -726,7 +723,6 @@ function closeWelcomeMessageModal() {
 async function saveWelcomeMessage() {
     const id = document.getElementById('welcomeMessageId').value;
     const content = document.getElementById('welcomeMessageContent').value.trim();
-    const sortOrder = parseInt(document.getElementById('welcomeMessageSortOrder').value, 10) || 0;
 
     if (!content) {
         alert('请输入激励语内容');
@@ -734,7 +730,7 @@ async function saveWelcomeMessage() {
     }
 
     const showGreeting = document.getElementById('welcomeMessageShowGreeting').checked;
-    const payload = { content, sort_order: sortOrder, show_greeting: showGreeting };
+    const payload = { content, show_greeting: showGreeting };
 
     try {
         if (id) {
