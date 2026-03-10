@@ -2,8 +2,10 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -274,11 +276,20 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 	}
 
 	var input struct {
-		NewPassword string `json:"new_password" binding:"required,min=6"`
+		NewPassword string `json:"new_password"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	newPassword := strings.TrimSpace(input.NewPassword)
+	if newPassword == "" {
+		newPassword, err = generateTempPassword(10)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate temporary password"})
+			return
+		}
 	}
 
 	// 获取用户信息用于审计日志
@@ -288,7 +299,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		targetLabel = u.Phone
 	}
 
-	if err := h.userService.AdminResetPassword(c.Request.Context(), userID, input.NewPassword); err != nil {
+	if err := h.userService.AdminResetPassword(c.Request.Context(), userID, newPassword); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, userService.ErrUserNotFound) {
 			status = http.StatusNotFound
@@ -306,7 +317,10 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		IPAddress:   c.ClientIP(),
 	})
 
-	c.JSON(http.StatusOK, gin.H{"message": "password reset successfully"})
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "password reset successfully",
+		"new_password": newPassword,
+	})
 }
 
 // ToggleUserActive 切换用户激活状态
@@ -760,6 +774,27 @@ func fallbackAdminString(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+func generateTempPassword(length int) (string, error) {
+	if length < 8 {
+		length = 8
+	}
+
+	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+	var builder strings.Builder
+	builder.Grow(length)
+
+	max := big.NewInt(int64(len(charset)))
+	for i := 0; i < length; i++ {
+		n, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", err
+		}
+		builder.WriteByte(charset[n.Int64()])
+	}
+
+	return builder.String(), nil
 }
 
 // --- 话题管理 ---
