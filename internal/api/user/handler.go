@@ -368,6 +368,7 @@ func (h *Handler) ListMemoirs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.attachConversationTimes(c.Request.Context(), memoirs)
 
 	c.JSON(http.StatusOK, gin.H{
 		"memoirs": memoirs,
@@ -402,8 +403,27 @@ func (h *Handler) GetMemoir(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+	h.attachConversationTimes(c.Request.Context(), []*memoir.Memoir{m})
 
 	c.JSON(http.StatusOK, m)
+}
+
+func (h *Handler) attachConversationTimes(ctx context.Context, memoirs []*memoir.Memoir) {
+	for _, m := range memoirs {
+		if m == nil || m.ConversationID == nil {
+			continue
+		}
+
+		conv, err := h.convService.GetByID(ctx, *m.ConversationID)
+		if err != nil || conv == nil {
+			continue
+		}
+
+		start := conv.CreatedAt
+		end := conv.UpdatedAt
+		m.ConversationStart = &start
+		m.ConversationEnd = &end
+	}
 }
 
 // UpdateMemoir 更新回忆录

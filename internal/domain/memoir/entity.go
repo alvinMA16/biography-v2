@@ -34,6 +34,10 @@ type Memoir struct {
 	EndYear    *int    `json:"end_year" db:"end_year"`
 	SortOrder  int     `json:"sort_order" db:"sort_order"`
 
+	// 关联对话时间（非数据库字段）
+	ConversationStart *time.Time `json:"conversation_start,omitempty" db:"-"`
+	ConversationEnd   *time.Time `json:"conversation_end,omitempty" db:"-"`
+
 	// 时间戳
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`

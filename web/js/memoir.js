@@ -70,8 +70,7 @@ function renderMemoirs(memoirs) {
 
     listContainer.innerHTML = memoirs.map(memoir => {
         const isGenerating = memoir.status === 'generating';
-        const timeText = formatTimeRange(memoir.conversation_start, memoir.conversation_end);  // 对话时间
-        const yearText = formatYearRange(memoir.year_start, memoir.year_end, memoir.time_period);  // 内容年份
+        const timeText = formatTimeRange(memoir.conversation_start, memoir.conversation_end);
 
         return `
             <div class="memoir-item ${isGenerating ? 'generating' : ''}"
@@ -81,7 +80,6 @@ function renderMemoirs(memoirs) {
                         <h3>${memoir.title}</h3>
                         ${isGenerating ? '<span class="memoir-status">撰写中...</span>' : ''}
                     </div>
-                    ${yearText ? `<p class="memoir-year">${yearText}</p>` : ''}
                     ${timeText ? `<p class="memoir-time">${timeText}</p>` : ''}
                 </div>
                 <button class="btn-delete" onclick="deleteMemoir(event, '${memoir.id}')" title="删除">
@@ -94,48 +92,38 @@ function renderMemoirs(memoirs) {
     }).join('');
 }
 
-// 格式化年份范围
-function formatYearRange(yearStart, yearEnd, timePeriod) {
-    let parts = [];
-
-    // 年份部分
-    if (yearStart && yearEnd) {
-        if (yearStart === yearEnd) {
-            parts.push(`${yearStart}年`);
-        } else {
-            parts.push(`${yearStart}-${yearEnd}年`);
-        }
-    } else if (yearStart) {
-        parts.push(`${yearStart}年`);
-    }
-
-    // 时期描述
-    if (timePeriod) {
-        parts.push(timePeriod);
-    }
-
-    return parts.join(' · ');
-}
-
 // 格式化时间范围
 function formatTimeRange(start, end) {
     if (!start) return '';
 
-    // 如果开始和结束在同一天，只显示日期一次
-    if (start && end) {
-        const startDate = start.split(' ')[0];
-        const endDate = end.split(' ')[0];
-        const startTime = start.split(' ')[1];
-        const endTime = end.split(' ')[1];
+    const startDate = new Date(start);
+    if (Number.isNaN(startDate.getTime())) return '';
 
-        if (startDate === endDate) {
-            return `${startDate} ${startTime} - ${endTime}`;
-        } else {
-            return `${start} - ${end}`;
+    if (end) {
+        const endDate = new Date(end);
+        if (!Number.isNaN(endDate.getTime())) {
+            const startDay = startDate.toLocaleDateString('zh-CN');
+            const endDay = endDate.toLocaleDateString('zh-CN');
+            const startTime = formatClock(startDate);
+            const endTime = formatClock(endDate);
+
+            if (startDay === endDay) {
+                return `${startDay} ${startTime} - ${endTime}`;
+            }
+
+            return `${startDay} ${startTime} - ${endDay} ${endTime}`;
         }
     }
 
-    return start;
+    return `${startDate.toLocaleDateString('zh-CN')} ${formatClock(startDate)}`;
+}
+
+function formatClock(date) {
+    return date.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
 }
 
 // 显示空状态
