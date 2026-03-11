@@ -1756,7 +1756,7 @@ function formatDate(value) {
     return date.toLocaleString('zh-CN');
 }
 
-function showMemoirDetail(memoirId) {
+async function showMemoirDetail(memoirId) {
     if (!currentUserDetail) return;
 
     const memoir = currentUserDetail.memoirs.find(m => m.id === memoirId);
@@ -1765,9 +1765,25 @@ function showMemoirDetail(memoirId) {
     currentMemoirDetail = memoir;
 
     // 查找关联的会话
-    const conversation = memoir.conversation_id
+    let conversation = memoir.conversation_id
         ? currentUserDetail.conversations.find(c => c.id === memoir.conversation_id)
         : null;
+
+    if (memoir.conversation_id && (!conversation || !Array.isArray(conversation.messages))) {
+        try {
+            conversation = await adminRequest(`/admin/conversations/${memoir.conversation_id}`);
+            if (conversation && Array.isArray(currentUserDetail.conversations)) {
+                const index = currentUserDetail.conversations.findIndex(c => c.id === conversation.id);
+                if (index >= 0) {
+                    currentUserDetail.conversations[index] = conversation;
+                } else {
+                    currentUserDetail.conversations.push(conversation);
+                }
+            }
+        } catch (error) {
+            console.error('加载对话详情失败:', error);
+        }
+    }
 
     // 设置标题
     document.getElementById('memoirDetailTitle').textContent = memoir.title;
@@ -1839,7 +1855,7 @@ async function regenerateAdminMemoir() {
         }
 
         currentMemoirDetail = updatedMemoir;
-        showMemoirDetail(updatedMemoir.id);
+        await showMemoirDetail(updatedMemoir.id);
     } catch (error) {
         console.error('重新生成回忆录失败:', error);
         alert('重新生成失败: ' + error.message);
@@ -1883,7 +1899,7 @@ async function regenerateAdminMemoirGroup() {
         }
 
         if (memoirs.length > 0 && currentUserDetail?.memoirs?.some(m => m.id === memoirs[0].id)) {
-            showMemoirDetail(memoirs[0].id);
+            await showMemoirDetail(memoirs[0].id);
         } else {
             closeMemoirDetailModal();
         }
