@@ -874,7 +874,13 @@ body {
 }
 
 .chat-page-header .header-title {
-    padding: 0 0.5em;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    flex: none;
+    padding: 0;
+    pointer-events: none;
 }
 
 .chat-page-header .chat-header-spacer {
