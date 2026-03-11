@@ -9,6 +9,7 @@ const api = {
     async request(endpoint, options = {}) {
         const url = `${API_BASE_URL}${endpoint}`;
         const token = storage.get('token');
+        const isAuthLoginRequest = endpoint === '/auth/login';
         const headers = {
             'Content-Type': 'application/json',
             ...(options.headers || {}),
@@ -24,7 +25,7 @@ const api = {
 
         try {
             const response = await fetch(url, config);
-            if (response.status === 401) {
+            if (response.status === 401 && !isAuthLoginRequest) {
                 // token 无效或过期，跳转登录页
                 clearAuthSessionState({ includeRecorder: true });
                 window.location.href = 'login.html';
