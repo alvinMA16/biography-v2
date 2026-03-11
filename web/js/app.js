@@ -386,7 +386,7 @@ async function submitChangePassword() {
 const RECORDERS = {
     female: {
         name: '忆安',
-        speaker: 'zh_female_kefunvsheng_uranus_bigtts',
+        speaker: 'zh_female_tianmeixiaoyuan_uranus_bigtts',
         // 预览用的简短招呼
         previewGreeting: '您好，我是忆安。很高兴能成为您的人生记录师，期待听您讲述那些珍贵的回忆。'
     },
