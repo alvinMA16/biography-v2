@@ -142,7 +142,8 @@ function getFirstSessionStatus(user) {
     if (user.onboarding_completed) {
         return { key: 'completed', label: '已完成', className: 'badge-yes' };
     }
-    if ((user.conversation_count ?? 0) > 0) {
+    const conversationCount = user.conversation_count ?? user.total_conversations ?? user.conversations?.length ?? 0;
+    if (conversationCount > 0) {
         return { key: 'started', label: '进行中', className: 'badge-warn' };
     }
     return { key: 'not_started', label: '未开始', className: 'badge-no' };
@@ -1373,9 +1374,7 @@ function renderUserDetail(detail) {
     document.getElementById('memoirCount').textContent = memoirs.length;
     renderMemoirList(memoirs, conversations);
     renderUserHealthSummary(detail);
-
-    // 使用统计
-    renderUserStats(detail.stats);
+    renderUserStats(detail);
 
     // 话题池
     renderTopicPool(detail.topic_pool);
@@ -1403,71 +1402,103 @@ function renderUserDetail(detail) {
 function renderUserHealthSummary(detail) {
     const conversations = detail.conversations || [];
     const memoirs = detail.memoirs || [];
+    const topics = detail.topic_pool || [];
     const isActive = detail.is_active !== false;
     const firstSession = getFirstSessionStatus(detail);
+    const recentConversations = conversations.filter(c => isWithinDays(c.created_at, 14)).length;
+    const recentMemoirs = memoirs.filter(m => isWithinDays(m.created_at, 14)).length;
 
-    let stageText = '已进入正式使用';
-    if (firstSession.key === 'not_started') {
-        stageText = '还没开始首次对话';
-    } else if (firstSession.key === 'started') {
-        stageText = '首次对话还没走完';
-    }
+    let overall = {
+        label: '状态稳定',
+        className: 'is-good',
+        note: '这位用户当前链路基本正常，适合观察后续内容增长。',
+        action: '继续观察近期活跃和新增回忆录即可。'
+    };
 
-    let contentStatus = '内容沉淀正常';
-    if (conversations.length === 0) {
-        contentStatus = '还没有任何对话';
-    } else if (memoirs.length === 0) {
-        contentStatus = '已有对话，暂时没有回忆录';
-    }
-
-    let recommendedAction = '当前状态稳定，优先观察后续活跃情况。';
     if (!isActive) {
-        recommendedAction = '账号当前已禁用，如需恢复使用，先确认原因再启用。';
+        overall = {
+            label: '账号已禁用',
+            className: 'is-danger',
+            note: '当前用户账号不可用，先确认禁用原因，再决定是否恢复。',
+            action: '如需恢复使用，先核对禁用原因和风险，再执行启用。'
+        };
     } else if (firstSession.key === 'not_started') {
-        recommendedAction = '建议优先引导用户完成首次对话，先让他顺利留下第一段故事。';
+        overall = {
+            label: '首次对话未开始',
+            className: 'is-warn',
+            note: '用户还没有留下第一段故事，当前最重要的是完成首次启动。',
+            action: '优先引导用户完成首次对话，不要急着追求更多统计数据。'
+        };
     } else if (firstSession.key === 'started') {
-        recommendedAction = '用户已经开始说了，建议关注首次对话为什么没有自然收尾。';
+        overall = {
+            label: '首次对话未收口',
+            className: 'is-warn',
+            note: '用户已经开始讲，但首次流程没有自然完成，容易卡在中间状态。',
+            action: '优先检查首次对话为什么没有自然结束，以及是否正确沉淀内容。'
+        };
     } else if (conversations.length > 0 && memoirs.length === 0) {
-        recommendedAction = '已有聊天但没有内容沉淀，建议检查回忆录生成链路。';
+        overall = {
+            label: '有对话无沉淀',
+            className: 'is-danger',
+            note: '用户已经有聊天记录，但内容没有进入回忆录列表。',
+            action: '优先检查摘要、回忆录生成和落库链路。'
+        };
+    } else if (recentConversations > 0 && recentMemoirs === 0) {
+        overall = {
+            label: '近期沉淀偏弱',
+            className: 'is-warn',
+            note: '最近两周用户还在聊天，但没有新的回忆录产出。',
+            action: '重点看最近对话是否都成功沉淀，以及话题质量是否在退化。'
+        };
     }
 
-    document.getElementById('detailJourneyStage').textContent = stageText;
-    document.getElementById('detailContentStatus').textContent = contentStatus;
-    document.getElementById('detailRecommendedAction').textContent = recommendedAction;
+    const accountStatus = isActive ? ['正常', '账号可正常使用'] : ['已禁用', '需要确认禁用原因'];
+    const firstSessionStatus = firstSession.key === 'completed'
+        ? ['已完成', '已进入正式聊天阶段']
+        : firstSession.key === 'started'
+            ? ['进行中', '用户已经开始说，但还没自然收尾']
+            : ['未开始', '还没有留下第一段故事'];
+    const contentStatus = conversations.length === 0
+        ? ['暂无内容', '还没有任何对话记录']
+        : memoirs.length === 0
+            ? ['待沉淀', '已有对话，但回忆录还没生成出来']
+            : [`已沉淀 ${memoirs.length} 篇`, recentMemoirs > 0 ? '最近两周仍有新的内容产出' : '已有沉淀，但近期没有新增'];
+    const topicStatus = topics.length > 0
+        ? [`${topics.length} 个可用`, '当前有可继续引导的聊天入口']
+        : ['暂时为空', memoirs.length > 0 ? '建议补充或重建话题池' : '等有更多内容后再生成更合适'];
+
+    const overallEl = document.getElementById('detailOverallStatus');
+    overallEl.textContent = overall.label;
+    overallEl.className = `admin-health-pill ${overall.className}`;
+    document.getElementById('detailOverallNote').textContent = overall.note;
+    document.getElementById('detailNextAction').textContent = overall.action;
+
+    document.getElementById('detailAccountStatus').textContent = accountStatus[0];
+    document.getElementById('detailAccountNote').textContent = accountStatus[1];
+    document.getElementById('detailFirstSessionStatus').textContent = firstSessionStatus[0];
+    document.getElementById('detailFirstSessionNote').textContent = firstSessionStatus[1];
+    document.getElementById('detailContentPipelineStatus').textContent = contentStatus[0];
+    document.getElementById('detailContentPipelineNote').textContent = contentStatus[1];
+    document.getElementById('detailTopicPoolStatus').textContent = topicStatus[0];
+    document.getElementById('detailTopicPoolNote').textContent = topicStatus[1];
 }
 
-function renderUserStats(stats) {
-    // 累计数据
-    document.getElementById('statTotalConv').textContent = stats?.total_conversations ?? 0;
-    document.getElementById('statTotalMemoirs').textContent = stats?.total_memoirs ?? 0;
-    document.getElementById('statTotalMessages').textContent = stats?.total_messages ?? 0;
-    document.getElementById('statTotalDuration').textContent =
-        stats?.total_duration_mins ? formatDuration(stats.total_duration_mins) : '-';
-    document.getElementById('statTotalChars').textContent =
-        stats?.total_memoir_chars ? formatNumber(stats.total_memoir_chars) : '0';
+function renderUserStats(detail) {
+    const stats = detail?.stats || {};
+    const conversations = detail?.conversations || [];
+    const memoirs = detail?.memoirs || [];
+    const activeDays = calculateActiveDays(conversations);
+    const latestMemoir = [...memoirs].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
 
-    // 平均数据
-    document.getElementById('statAvgDuration').textContent =
-        stats?.avg_conversation_duration_mins ? `${stats.avg_conversation_duration_mins}分钟` : '-';
-    document.getElementById('statAvgMessages').textContent =
-        stats?.avg_messages_per_conversation ? `${stats.avg_messages_per_conversation}轮` : '-';
-    document.getElementById('statConvRate').textContent =
-        stats?.conversation_to_memoir_rate != null ? `${(stats.conversation_to_memoir_rate * 100).toFixed(0)}%` : '-';
-    document.getElementById('statAvgMemoirLen').textContent =
-        stats?.avg_memoir_length ? `${stats.avg_memoir_length}字` : '-';
-    document.getElementById('statFirstMemoirDays').textContent =
-        stats?.first_memoir_days != null ? `${stats.first_memoir_days}天` : '-';
-
-    // 人生阶段覆盖
-    const stages = stats?.life_stages_coverage || {};
-    const stageKeys = Object.keys(stages);
-    if (stageKeys.length > 0) {
-        document.getElementById('statLifeStages').innerHTML = stageKeys.map(stage =>
-            `<span class="admin-stage-tag">${stage}<span class="stage-count">${stages[stage]}</span></span>`
-        ).join('');
-    } else {
-        document.getElementById('statLifeStages').innerHTML = '<span class="text-muted">暂无</span>';
-    }
+    document.getElementById('detailStatLastActiveShort').textContent = formatRecencyLabel(getLatestActivityDate(conversations));
+    document.getElementById('detailStatActiveDays').textContent = activeDays;
+    document.getElementById('detailStatTotalConv').textContent = stats.total_conversations ?? conversations.length ?? 0;
+    document.getElementById('detailStatTotalMemoirs').textContent = stats.total_memoirs ?? memoirs.length ?? 0;
+    document.getElementById('detailStatConvRate').textContent =
+        stats.conversation_to_memoir_rate != null ? `${(stats.conversation_to_memoir_rate * 100).toFixed(0)}%` : '-';
+    document.getElementById('detailStatLatestMemoirTime').textContent = latestMemoir?.created_at
+        ? formatRecencyLabel(latestMemoir.created_at)
+        : '暂无';
 }
 
 // 格式化时长（分钟 -> 小时分钟）
@@ -1483,6 +1514,33 @@ function formatDuration(minutes) {
 // 格式化数字（添加千分位）
 function formatNumber(num) {
     return num.toLocaleString('zh-CN');
+}
+
+function getLatestActivityDate(conversations) {
+    if (!conversations || conversations.length === 0) return null;
+    const sorted = [...conversations].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    return sorted[0]?.created_at || null;
+}
+
+function formatRecencyLabel(value) {
+    if (!value) return '暂无';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '暂无';
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+    if (diffDays <= 0) return '今天';
+    if (diffDays === 1) return '昨天';
+    if (diffDays < 7) return `${diffDays}天前`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}周前`;
+    return formatDate(value);
+}
+
+function isWithinDays(value, days) {
+    if (!value) return false;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return false;
+    return (Date.now() - date.getTime()) <= days * 24 * 60 * 60 * 1000;
 }
 
 function renderTopicPool(topics) {

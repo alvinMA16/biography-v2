@@ -2472,31 +2472,35 @@ body {
 
 .admin-health-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
 }
 
 .admin-health-item {
-    padding: 16px 18px;
+    padding: 14px 14px 12px;
     border-radius: 12px;
-    background: #faf8f5;
-    border: 1px solid #efe8df;
-}
-
-.admin-health-item-wide {
-    grid-column: span 3;
+    background: var(--color-bg-dark);
+    border: none;
 }
 
 .admin-health-label {
-    font-size: 0.8em;
+    font-size: 0.78em;
     color: var(--color-text-light);
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .admin-health-value {
-    font-size: 0.92em;
+    font-size: 1em;
+    font-weight: 600;
     color: var(--color-text);
-    line-height: 1.6;
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+.admin-health-note {
+    font-size: 0.8em;
+    color: var(--color-text-light);
+    line-height: 1.5;
 }
 
 /* 用户概览卡片 */
@@ -2714,51 +2718,30 @@ body {
     overflow: hidden;
 }
 
-.admin-stats-section {
-    margin-bottom: 20px;
-}
-
-.admin-stats-section:last-child {
-    margin-bottom: 0;
-}
-
-.admin-stats-section-title {
-    font-size: 0.85em;
-    font-weight: 500;
-    color: var(--color-text-light);
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.admin-stats-grid {
+.admin-kpi-grid {
+    text-align: center;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
 }
 
-.admin-stat-item {
-    text-align: center;
-    padding: 14px 10px;
+.admin-kpi-item {
+    padding: 16px 12px;
     background: var(--color-bg-dark);
-    border-radius: 10px;
+    border-radius: 12px;
 }
 
-.admin-stat-item .stat-value {
+.admin-kpi-item .stat-value {
     font-size: 1.3em;
     font-weight: 600;
     color: var(--color-accent);
     margin-bottom: 4px;
 }
 
-.admin-stat-item .stat-label {
+.admin-kpi-item .stat-label {
     font-size: 0.75em;
     color: var(--color-text-light);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
+    line-height: 1.4;
 }
 
 /* Info icon with tooltip */
@@ -2827,39 +2810,57 @@ body {
     visibility: visible;
 }
 
-.admin-stat-item.admin-stat-stages {
-    grid-column: span 1;
-    text-align: left;
+.admin-ops-overview {
+    margin-bottom: 18px;
+    padding: 16px 18px;
+    background: linear-gradient(180deg, rgba(139, 69, 19, 0.06), rgba(139, 69, 19, 0.02));
+    border: 1px solid rgba(139, 69, 19, 0.12);
+    border-radius: 14px;
 }
 
-.admin-stat-stages .stat-label {
-    margin-bottom: 8px;
-}
-
-.stat-stages {
+.admin-ops-overview-header {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
 }
 
-.admin-stage-tag {
+.admin-health-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    background: rgba(139, 69, 19, 0.1);
-    color: var(--color-accent);
-    border-radius: 12px;
-    font-size: 0.78em;
-    font-weight: 500;
+    justify-content: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 0.82em;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
-.admin-stage-tag .stage-count {
-    background: var(--color-accent);
-    color: white;
-    padding: 1px 6px;
-    border-radius: 8px;
-    font-size: 0.9em;
+.admin-health-pill.is-good {
+    background: rgba(46, 125, 50, 0.12);
+    color: #2e7d32;
+}
+
+.admin-health-pill.is-warn {
+    background: rgba(245, 124, 0, 0.14);
+    color: #b26a00;
+}
+
+.admin-health-pill.is-danger {
+    background: rgba(211, 47, 47, 0.12);
+    color: #c62828;
+}
+
+.admin-ops-overview-text {
+    font-size: 0.95em;
+    color: var(--color-text);
+    line-height: 1.6;
+}
+
+.admin-ops-overview-action {
+    font-size: 0.88em;
+    color: var(--color-text-light);
+    line-height: 1.6;
 }
 
 /* 话题池卡片 */
@@ -3318,11 +3319,7 @@ body {
     }
 
     .admin-health-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .admin-health-item-wide {
-        grid-column: span 1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .admin-profile-stats {
@@ -3388,6 +3385,15 @@ body {
     .admin-profile-stat {
         padding: 0 12px;
     }
+
+    .admin-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .admin-ops-overview-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
 }
 
 @media (max-width: 480px) {
@@ -3407,5 +3413,10 @@ body {
 
     .admin-profile-name {
         font-size: 1.2em;
+    }
+
+    .admin-health-grid,
+    .admin-kpi-grid {
+        grid-template-columns: 1fr;
     }
 }
