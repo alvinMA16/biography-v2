@@ -16,7 +16,9 @@ async function handleLogin(event) {
     errorEl.textContent = '';
 
     if (!phone || !password) {
-        toast.error('请输入手机号和密码');
+        const message = '请输入手机号和密码';
+        errorEl.textContent = message;
+        toast.error(message);
         return;
     }
 
@@ -57,6 +59,7 @@ async function handleLogin(event) {
                 errorMsg = error.message;
             }
         }
+        errorEl.textContent = errorMsg;
         toast.error(errorMsg);
         btn.disabled = false;
         btn.textContent = '登录';
