@@ -34,14 +34,13 @@ let gainNode = null;   // 音量控制节点
 let isRecording = false;
 let currentAIResponse = '';  // 累积AI回复文本
 let isAISpeaking = false;    // AI是否正在说话
-let isFirstTTS = true;       // 是否是第一次 TTS（开场白）
-let pendingGreeting = null;  // 后端发来的开场白文本，等 TTS 开始时显示
 let shouldResumeRecording = false; // TTS/播放彻底结束后再恢复录音
 let lastVoiceDetectedAt = 0; // 最近一次检测到人声时间戳
 let sentVoiceSinceLastStop = false;
 let vadTimer = null;
 let awaitingResponse = false; // 已发送 stop，等待 AI 回复
 let userSpeechActive = false; // 当前是否检测到用户正在说话
+let lastTurnState = null;
 let voiceBars = [];
 let pendingPcmBytes = new Uint8Array(0);
 let preSpeechPcmBytes = new Uint8Array(0);
@@ -232,39 +231,14 @@ function handleServerMessage(message) {
     }
 
     switch (message.type) {
-        // 兼容旧协议：audio/text/event/status
-        case 'audio':
-            // 收到音频数据，加入播放队列
-            const audioData = base64ToArrayBuffer(message.data);
-            queueAudio(audioData, message.sample_rate || SAMPLE_RATE_OUTPUT);
+        case 'turn_status':
+            handleTurnStatus(message);
             break;
 
-        // 新协议：tts
         case 'tts':
-            isAISpeaking = true;
-            awaitingResponse = false;
-            sentVoiceSinceLastStop = false;
-            userSpeechActive = false;
-            setVoiceActive(false);
-            updateVoiceStatus(`${recorderName}正在说话`);
             queueAudio(base64ToArrayBuffer(message.data), message.sample_rate || SAMPLE_RATE_OUTPUT);
             break;
 
-        case 'text':
-            // 收到文本
-            if (message.text_type === 'asr') {
-                // 用户说的话 - 不显示
-                DEBUG_MODE && console.log('用户说:', message.content);
-            } else if (message.text_type === 'response') {
-                // AI 回复文字 - 累积并显示
-                if (isAISpeaking && message.content) {
-                    currentAIResponse += message.content;  // 累积文本
-                    updateAIText(currentAIResponse);
-                }
-            }
-            break;
-
-        // 新协议：asr/response/done/error
         case 'asr':
             DEBUG_MODE && console.log('用户说:', message.text);
             break;
@@ -294,28 +268,6 @@ function handleServerMessage(message) {
             showError(message.error || '对话异常');
             break;
 
-        case 'event':
-            handleEvent(message.event, message.payload);
-            break;
-
-        case 'status':
-            if (message.status === 'error') {
-                showError(message.message);
-            }
-            break;
-
-        case 'debug':
-            // Debug 模式下显示调试信息
-            if (DEBUG_MODE && message.message) {
-                showToast(message.message);
-            }
-            break;
-
-        case 'greeting_text':
-            // 后端发来的开场白文本，等 TTS 开始时直接显示
-            pendingGreeting = message.content;
-            break;
-
         case 'first_session_complete':
             // 模型调用了结束工具，等 TTS 播完后自动结束对话
             if (isFirstSessionMode && !autoEndTriggered) {
@@ -324,66 +276,64 @@ function handleServerMessage(message) {
                 waitForPlaybackAndEnd();
             }
             break;
-
-        case 'intervention':
-            break;
     }
 }
 
-function handleEvent(event, payload) {
-    DEBUG_MODE && console.log('事件:', event, payload);
+function handleTurnStatus(message) {
+    const state = message.state;
+    lastTurnState = state || null;
+    if (!state) return;
 
-    switch (event) {
-        case 350:
-            // TTS 开始 - AI 开始说话
-            isAISpeaking = true;
-            awaitingResponse = false;
-            sentVoiceSinceLastStop = false;
-            userSpeechActive = false;
-            currentAIResponse = '';  // 清空，准备接收新回复
-            // 第一次 TTS：直接显示后端发来的开场白（不依赖豆包回显）
-            if (isFirstTTS && pendingGreeting) {
-                currentAIResponse = pendingGreeting;
-                updateAIText(pendingGreeting);
-                pendingGreeting = null;
-            }
-            updateVoiceStatus(`${recorderName}正在说话`);
+    DEBUG_MODE && console.log('轮次状态:', {
+        turnId: message.turn_id,
+        state: message.state,
+        stage: message.stage,
+        at: message.at,
+        message: message.message,
+    });
+
+    switch (state) {
+        case 'session_initializing':
+        case 'greeting_preparing':
+            updateVoiceStatus('请稍候');
             setVoiceActive(false);
             break;
 
-        case 359:
-            // TTS 结束 - AI 说完了，可以开始录音
-            isAISpeaking = false;
-            awaitingResponse = false;
-            sentVoiceSinceLastStop = false;
-            userSpeechActive = false;
-            lastVoiceDetectedAt = Date.now();
-            // 第一次 TTS 结束后，标记已完成开场白
-            if (isFirstTTS) {
-                isFirstTTS = false;
-            }
-            updateVoiceStatus('我在听，请您慢慢说');
-            shouldResumeRecording = true;
-            maybeResumeRecordingAfterPlayback();
+        case 'ready_for_user':
+            applyListeningState();
             break;
 
-        case 450:
-            // 用户开始说话 - 清空音频队列，音波动起来
-            // 不更新上方文字，保持显示AI之前的问题
-            clearAudioQueue();
-            updateVoiceStatus('您说，我在听');
-            // 音波由本地实时音量驱动，不在这里强制激活
+        case 'user_audio_receiving':
             break;
 
-        case 459:
-            // 用户说完 - AI 开始处理
-            updateVoiceStatus('请稍等，我记一下');
-            setVoiceActive(false);
+        case 'user_stop_received':
+        case 'asr_finalizing':
+        case 'asr_final_received':
+        case 'asr_interim_fallback':
+        case 'assistant_response_sent':
+        case 'llm_request_started':
+        case 'llm_response_received':
+        case 'tts_request_started':
+            applyProcessingState();
             break;
 
-        case 152:
-        case 153:
-            // 会话结束
+        case 'greeting_speaking':
+        case 'tts_first_chunk_sent':
+            applySpeakingState();
+            break;
+
+        case 'asr_empty':
+        case 'turn_done_sent':
+            break;
+
+        case 'tts_completed':
+            break;
+
+        case 'turn_failed':
+            showError(message.message || '对话异常');
+            break;
+
+        case 'session_ended':
             isAISpeaking = false;
             updateAIText('对话已结束');
             updateVoiceStatus('已结束');
@@ -391,6 +341,36 @@ function handleEvent(event, payload) {
             stopRecording();
             break;
     }
+}
+
+function applySpeakingState() {
+    isAISpeaking = true;
+    awaitingResponse = false;
+    sentVoiceSinceLastStop = false;
+    userSpeechActive = false;
+    setVoiceActive(false);
+    updateVoiceStatus(`${recorderName}正在说话`);
+}
+
+function applyListeningState() {
+    isAISpeaking = false;
+    awaitingResponse = false;
+    sentVoiceSinceLastStop = false;
+    userSpeechActive = false;
+    lastVoiceDetectedAt = Date.now();
+    setVoiceActive(false);
+    updateVoiceStatus('我在听，请您慢慢说');
+    shouldResumeRecording = true;
+    maybeResumeRecordingAfterPlayback();
+}
+
+function applyProcessingState() {
+    isAISpeaking = false;
+    awaitingResponse = true;
+    sentVoiceSinceLastStop = false;
+    userSpeechActive = false;
+    setVoiceActive(false);
+    updateVoiceStatus('稍等，让我记录一下');
 }
 
 // ========== 音频录制 ==========

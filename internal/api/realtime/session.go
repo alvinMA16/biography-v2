@@ -77,6 +77,7 @@ type Session struct {
 
 	turnIndex             int
 	turnDiagnosticPersist func(input *turntrace.CreateInput) error
+	audioReceivingSent    bool
 }
 
 // NewSession 创建新会话
@@ -110,6 +111,7 @@ func NewSession(
 func (s *Session) Run() error {
 	defer s.cancel()
 	defer s.closeASRStream()
+	defer s.sendTurnStatus(0, TurnStateSessionEnded, "", "")
 	defer func() {
 		log.Printf("[Session] 会话结束: chunks=%d, bytes=%d, state=%d", s.audioChunks, s.audioBytes, s.state)
 	}()
@@ -239,6 +241,7 @@ func (s *Session) closeASRStream() {
 
 // init 初始化会话
 func (s *Session) init() error {
+	s.sendTurnStatus(0, TurnStateSessionInitializing, "", "")
 	if s.asrProvider != nil {
 		if err := s.ensureASRStream(); err != nil {
 			return fmt.Errorf("init ASR stream: %w", err)
@@ -261,6 +264,7 @@ func (s *Session) init() error {
 	// 发送开场白
 	greeting := s.getGreeting()
 	if greeting != "" {
+		s.sendTurnStatus(0, TurnStateGreetingPreparing, "", "")
 		log.Printf("[Session] 发送开场白: len=%d", len(greeting))
 		s.mu.Lock()
 		s.messages = append(s.messages, llm.Message{
@@ -274,6 +278,7 @@ func (s *Session) init() error {
 		s.sendResponse(greeting)
 
 		// TTS 合成开场白
+		s.sendTurnStatus(0, TurnStateGreetingSpeaking, "tts", "")
 		if err := s.synthesizeAndSendGreeting(greeting); err != nil {
 			log.Printf("[Session] TTS 开场白错误: %v", err)
 		}
@@ -282,6 +287,7 @@ func (s *Session) init() error {
 	s.setState(StateListening, "初始化完成，进入监听")
 	// 通知前端当前轮次已结束，可以开始录音。
 	s.sendDone()
+	s.sendTurnStatus(0, TurnStateReadyForUser, "", "")
 	return nil
 }
 
@@ -309,6 +315,10 @@ func (s *Session) handleAudio(audioBase64 string) error {
 		return s.ctx.Err()
 	case audioChan <- audioData:
 		s.audioDropStreak = 0
+		if !s.audioReceivingSent {
+			s.audioReceivingSent = true
+			s.sendTurnStatus(s.turnIndex+1, TurnStateUserAudioReceiving, "", "")
+		}
 	case <-time.After(80 * time.Millisecond):
 		// 不阻塞主循环，音频拥塞时优先丢包并继续会话。
 		s.audioDropStreak++
@@ -404,9 +414,12 @@ func (s *Session) persistTurnDiagnostic(state *turnDiagnosticState) {
 // finishUserTurn 完成用户输入，开始生成回复
 func (s *Session) finishUserTurn() error {
 	turnState := s.newTurnDiagnostic(time.Now())
+	s.audioReceivingSent = false
+	s.sendTurnStatus(turnState.turnIndex, TurnStateUserStopReceived, "", "")
 
 	// 每轮 stop 后主动结束当前 ASR 会话，避免上游 idle timeout 影响下一轮。
 	s.closeASRStream()
+	s.sendTurnStatus(turnState.turnIndex, TurnStateASRFinalizing, "asr", "")
 	userText, userTextSource, asrFinalAt := s.collectUserTextWithGrace()
 	turnState.userText = userText
 	turnState.userTextSource = userTextSource
@@ -415,18 +428,29 @@ func (s *Session) finishUserTurn() error {
 	if userText == "" {
 		log.Printf("[Session] stop 收到但未识别到文本，结束本轮并继续监听")
 		s.setState(StateListening, "stop 后无识别文本")
+		s.sendTurnStatus(turnState.turnIndex, TurnStateASREmpty, "asr", "")
 		doneAt := time.Now()
 		s.sendDone()
 		turnState.outcome = turntrace.OutcomeEmptyInput
 		turnState.doneSentAt = &doneAt
+		s.sendTurnStatus(turnState.turnIndex, TurnStateTurnDoneSent, "", "")
+		s.sendTurnStatus(turnState.turnIndex, TurnStateReadyForUser, "", "")
 		s.persistTurnDiagnostic(turnState)
 		return nil
+	}
+
+	switch userTextSource {
+	case turntrace.UserTextSourceFinal:
+		s.sendTurnStatus(turnState.turnIndex, TurnStateASRFinalReceived, "asr", "")
+	case turntrace.UserTextSourceInterim:
+		s.sendTurnStatus(turnState.turnIndex, TurnStateASRInterimFallback, "asr", "")
 	}
 
 	log.Printf("[Session] 用户文本确认: len=%d", len(userText))
 	s.setState(StateThinking, "用户文本已确认，准备调用 LLM")
 	llmStartedAt := time.Now()
 	turnState.llmStartedAt = &llmStartedAt
+	s.sendTurnStatus(turnState.turnIndex, TurnStateLLMRequestStarted, "llm", "")
 
 	// 添加用户消息
 	s.mu.Lock()
@@ -444,6 +468,7 @@ func (s *Session) finishUserTurn() error {
 		turnState.outcome = turntrace.OutcomeLLMError
 		turnState.errorStage = stringPtr("llm")
 		turnState.errorMessage = stringPtr(err.Error())
+		s.sendTurnStatus(turnState.turnIndex, TurnStateTurnFailed, "llm", err.Error())
 		s.persistTurnDiagnostic(turnState)
 		return fmt.Errorf("LLM not available: %w", err)
 	}
@@ -473,11 +498,13 @@ func (s *Session) finishUserTurn() error {
 		turnState.outcome = turntrace.OutcomeLLMError
 		turnState.errorStage = stringPtr("llm")
 		turnState.errorMessage = stringPtr(err.Error())
+		s.sendTurnStatus(turnState.turnIndex, TurnStateTurnFailed, "llm", err.Error())
 		s.persistTurnDiagnostic(turnState)
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 	llmCompletedAt := time.Now()
 	turnState.llmCompletedAt = &llmCompletedAt
+	s.sendTurnStatus(turnState.turnIndex, TurnStateLLMResponseReceived, "llm", "")
 	if usedProvider != provider.Name() {
 		log.Printf("[Session] LLM 实际使用 provider=%s", usedProvider)
 	}
@@ -505,12 +532,14 @@ func (s *Session) finishUserTurn() error {
 
 	// 发送文字响应
 	s.sendResponse(assistantText)
+	s.sendTurnStatus(turnState.turnIndex, TurnStateAssistantSent, "", "")
 
 	// TTS 合成
 	s.setState(StateSpeaking, "LLM 完成，开始 TTS")
 	if s.ttsProvider != nil {
 		ttsStartedAt := time.Now()
 		turnState.ttsStartedAt = &ttsStartedAt
+		s.sendTurnStatus(turnState.turnIndex, TurnStateTTSRequestStarted, "tts", "")
 	}
 	ttsResult, err := s.synthesizeAndSend(assistantText)
 	if err != nil {
@@ -518,15 +547,18 @@ func (s *Session) finishUserTurn() error {
 		turnState.outcome = turntrace.OutcomeTTSError
 		turnState.errorStage = stringPtr("tts")
 		turnState.errorMessage = stringPtr(err.Error())
+		s.sendTurnStatus(turnState.turnIndex, TurnStateTurnFailed, "tts", err.Error())
 	} else if ttsResult != nil {
 		turnState.ttsFirstChunkAt = ttsResult.firstChunkAt
 		turnState.ttsCompletedAt = ttsResult.completedAt
+		s.sendTurnStatus(turnState.turnIndex, TurnStateTTSCompleted, "tts", "")
 	}
 
 	// 发送完成信号
 	doneAt := time.Now()
 	s.sendDone()
 	turnState.doneSentAt = &doneAt
+	s.sendTurnStatus(turnState.turnIndex, TurnStateTurnDoneSent, "", "")
 	s.persistTurnDiagnostic(turnState)
 
 	// 如果模型调用了结束工具，发送结束消息给前端
@@ -536,6 +568,7 @@ func (s *Session) finishUserTurn() error {
 	}
 
 	s.setState(StateListening, "本轮完成，继续监听")
+	s.sendTurnStatus(turnState.turnIndex, TurnStateReadyForUser, "", "")
 	return nil
 }
 
@@ -764,6 +797,7 @@ func (s *Session) synthesizeAndSend(text string) (*ttsSynthesisResult, error) {
 			if result.firstChunkAt == nil {
 				firstChunkAt := time.Now()
 				result.firstChunkAt = &firstChunkAt
+				s.sendTurnStatus(s.turnIndex, TurnStateTTSFirstChunkSent, "tts", "")
 			}
 			result.audio = append(result.audio, chunk.Data...)
 			s.sendTTS(chunk.Data, realtimeTTSSampleRate)
@@ -854,6 +888,17 @@ func (s *Session) sendDone() {
 	log.Printf("[Session] 向前端发送 done")
 	s.sendJSON(ServerMessage{
 		Type: MsgTypeDone,
+	})
+}
+
+func (s *Session) sendTurnStatus(turnID int, state TurnState, stage string, message string) {
+	s.sendJSON(ServerMessage{
+		Type:    MsgTypeTurnStatus,
+		TurnID:  turnID,
+		State:   state,
+		Stage:   stage,
+		Message: message,
+		At:      time.Now().Format(time.RFC3339Nano),
 	})
 }
 
