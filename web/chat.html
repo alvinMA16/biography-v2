@@ -6,6 +6,26 @@
     <title>对话 - 回忆录</title>
     <link rel="stylesheet" href="css/style.css">
     <style>
+        /* 结束对话按钮 - 悬浮左上角 */
+        .btn-end-chat {
+            position: absolute;
+            top: 1em;
+            left: 1.5em;
+            z-index: 10;
+            background: none;
+            border: 1px solid var(--color-border);
+            border-radius: 0;
+            font-size: var(--font-size-small);
+            color: var(--color-text-light);
+            cursor: pointer;
+            font-family: var(--font-sans);
+            padding: 0.4em 0.8em;
+        }
+        .btn-end-chat:hover {
+            color: var(--color-accent);
+            border-color: var(--color-accent);
+        }
+
         .welcome-modal .modal-content {
             max-width: 400px;
             text-align: center;
@@ -111,12 +131,8 @@
 </head>
 <body>
     <div class="container inner-page">
-        <header class="page-header chat-page-header">
-            <button class="btn-back" onclick="endChat()">← 结束对话</button>
-            <h1 class="header-title">对话</h1>
-            <span class="header-spacer chat-header-spacer" aria-hidden="true">← 结束对话</span>
-        </header>
-
+        <!-- 结束对话按钮 - 悬浮在左上角 -->
+        <button class="btn-end-chat" onclick="endChat()">← 结束对话</button>
 
         <main class="chat-main-stable">
             <!-- AI 说话内容区域 -->
