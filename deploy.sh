@@ -98,6 +98,10 @@ cmd_start() {
     docker compose build --no-cache backend
     docker compose up -d
 
+    log_info "清理 Docker 缓存..."
+    docker builder prune -f > /dev/null 2>&1 || true
+    docker image prune -f > /dev/null 2>&1 || true
+
     log_info "等待服务启动..."
     sleep 5
 
@@ -175,6 +179,10 @@ cmd_update() {
     cd "$DEPLOY_DIR"
     docker compose build --no-cache backend
     docker compose up -d
+
+    log_info "清理 Docker 缓存..."
+    docker builder prune -f > /dev/null 2>&1 || true
+    docker image prune -f > /dev/null 2>&1 || true
 
     sleep 5
     if curl -s http://localhost:8000/health > /dev/null 2>&1; then
