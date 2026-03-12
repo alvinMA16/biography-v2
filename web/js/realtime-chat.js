@@ -44,6 +44,10 @@ let lastTurnState = null;
 let voiceBars = [];
 let pendingPcmBytes = new Uint8Array(0);
 let preSpeechPcmBytes = new Uint8Array(0);
+let processingTimeouts = [];
+let processingStateActive = false;
+let longWaitDismissed = false;
+let processingStatusLevel = 0;
 
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
@@ -91,6 +95,7 @@ window.onload = async function() {
     }
 
     showLoading('正在连接');
+    bindTimeoutActions();
 
     // 初始化音频播放
     initPlayback();
@@ -344,6 +349,7 @@ function handleTurnStatus(message) {
 }
 
 function applySpeakingState() {
+    clearProcessingTimeouts();
     isAISpeaking = true;
     awaitingResponse = false;
     sentVoiceSinceLastStop = false;
@@ -353,6 +359,7 @@ function applySpeakingState() {
 }
 
 function applyListeningState() {
+    clearProcessingTimeouts();
     isAISpeaking = false;
     awaitingResponse = false;
     sentVoiceSinceLastStop = false;
@@ -365,12 +372,95 @@ function applyListeningState() {
 }
 
 function applyProcessingState() {
+    const wasActive = processingStateActive;
+    startProcessingTimeouts();
     isAISpeaking = false;
     awaitingResponse = true;
     sentVoiceSinceLastStop = false;
     userSpeechActive = false;
     setVoiceActive(false);
-    updateVoiceStatus('稍等，让我记录一下');
+    if (!wasActive || processingStatusLevel === 0) {
+        updateVoiceStatus('稍等，让我记录一下');
+    }
+}
+
+function bindTimeoutActions() {
+    const continueBtn = document.getElementById('continueWaitingBtn');
+    if (continueBtn) {
+        continueBtn.addEventListener('click', dismissLongWaitActions);
+    }
+
+    const endBtn = document.getElementById('timeoutEndChatBtn');
+    if (endBtn) {
+        endBtn.addEventListener('click', () => {
+            endChat();
+        });
+    }
+}
+
+function startProcessingTimeouts() {
+    if (processingStateActive) {
+        return;
+    }
+
+    processingStateActive = true;
+    longWaitDismissed = false;
+    processingStatusLevel = 0;
+    hideTimeoutActions();
+    clearScheduledProcessingTimeouts();
+
+    processingTimeouts = [
+        window.setTimeout(() => {
+            if (!processingStateActive) return;
+            processingStatusLevel = 1;
+            updateVoiceStatus('稍等，马上好。');
+        }, 10000),
+        window.setTimeout(() => {
+            if (!processingStateActive) return;
+            processingStatusLevel = 2;
+            updateVoiceStatus('网络不好，请稍等。');
+        }, 20000),
+        window.setTimeout(() => {
+            if (!processingStateActive) return;
+            processingStatusLevel = 3;
+            updateVoiceStatus('当前服务繁忙，您可以继续等待；如果长时间没有恢复，可以先结束这次对话，稍后再尝试。');
+            if (!longWaitDismissed) {
+                showTimeoutActions();
+            }
+        }, 30000),
+    ];
+}
+
+function clearProcessingTimeouts() {
+    processingStateActive = false;
+    longWaitDismissed = false;
+    processingStatusLevel = 0;
+    clearScheduledProcessingTimeouts();
+    hideTimeoutActions();
+}
+
+function clearScheduledProcessingTimeouts() {
+    processingTimeouts.forEach((timerId) => {
+        window.clearTimeout(timerId);
+    });
+    processingTimeouts = [];
+}
+
+function showTimeoutActions() {
+    const actions = document.getElementById('timeoutActions');
+    if (!actions) return;
+    actions.classList.add('show');
+}
+
+function hideTimeoutActions() {
+    const actions = document.getElementById('timeoutActions');
+    if (!actions) return;
+    actions.classList.remove('show');
+}
+
+function dismissLongWaitActions() {
+    longWaitDismissed = true;
+    hideTimeoutActions();
 }
 
 // ========== 音频录制 ==========
@@ -465,6 +555,7 @@ async function startRecording() {
 }
 
 function stopRecording() {
+    clearProcessingTimeouts();
     isRecording = false;
     awaitingResponse = false;
     userSpeechActive = false;
@@ -891,6 +982,7 @@ function showLoading(text) {
 }
 
 function showError(text) {
+    clearProcessingTimeouts();
     updateAIText('错误: ' + text);
     updateVoiceStatus('连接失败');
     setVoiceActive(false);

@@ -27,6 +27,21 @@
             min-width: 160px;
         }
 
+        .timeout-actions {
+            margin-top: 16px;
+            display: none;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .timeout-actions.show {
+            display: flex;
+        }
+        .timeout-actions .btn {
+            min-width: 132px;
+            padding: 0.7em 1.4em;
+        }
+
         /* 干预调试气泡 - 仅 debug 模式显示 */
         .intervention-container {
             position: fixed;
@@ -116,6 +131,10 @@
                     </div>
                 </div>
                 <p class="voice-status" id="voiceStatus">等待连接</p>
+                <div class="timeout-actions" id="timeoutActions">
+                    <button class="btn btn-secondary" type="button" id="continueWaitingBtn">继续等待</button>
+                    <button class="btn btn-primary" type="button" id="timeoutEndChatBtn">结束对话</button>
+                </div>
             </div>
         </main>
     </div>
