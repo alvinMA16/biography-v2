@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/peizhengma/biography-v2/internal/domain/turntrace"
 )
 
 // Status 对话状态
@@ -37,8 +38,9 @@ type Conversation struct {
 	DeletedAt *time.Time `json:"-" db:"deleted_at"`
 
 	// 关联数据（非数据库字段）
-	Messages     []Message `json:"messages,omitempty" db:"-"`
-	MessageCount int       `json:"message_count,omitempty" db:"-"`
+	Messages        []Message                   `json:"messages,omitempty" db:"-"`
+	MessageCount    int                         `json:"message_count,omitempty" db:"-"`
+	TurnDiagnostics []*turntrace.TurnDiagnostic `json:"turn_diagnostics,omitempty" db:"-"`
 }
 
 // Message 消息实体

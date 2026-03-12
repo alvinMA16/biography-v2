@@ -21,6 +21,7 @@ import (
 	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
+	turnTraceService "github.com/peizhengma/biography-v2/internal/service/turntrace"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
@@ -44,6 +45,7 @@ type RouterDeps struct {
 	WelcomeService      *welcomeService.Service
 	AuditService        *auditService.Service
 	FlowService         *flowService.Service
+	TurnTraceService    *turnTraceService.Service
 }
 
 // NewRouter 创建路由
@@ -120,6 +122,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		deps.TopicService,
 		deps.ConversationService,
 		deps.MemoirService,
+		deps.TurnTraceService,
 		deps.LLMService,
 		deps.ASRProvider,
 		deps.LLMManager,
@@ -146,6 +149,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 		deps.PresetService,
 		deps.WelcomeService,
 		deps.AuditService,
+		deps.TurnTraceService,
 	)
 
 	// 管理端路由（需要 Admin API Key）

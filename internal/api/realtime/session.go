@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/peizhengma/biography-v2/internal/domain/turntrace"
 	"github.com/peizhengma/biography-v2/internal/prompt"
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
@@ -60,6 +61,7 @@ type Session struct {
 	// 当前用户输入缓冲（由 ASR 消费协程写入）
 	currentUserText strings.Builder
 	currentASRText  string
+	lastASRFinalAt  *time.Time
 	asrTextMu       sync.Mutex
 
 	// ASR 流（一个会话内复用）
@@ -72,6 +74,9 @@ type Session struct {
 	// 上下文取消
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	turnIndex             int
+	turnDiagnosticPersist func(input *turntrace.CreateInput) error
 }
 
 // NewSession 创建新会话
@@ -82,20 +87,22 @@ func NewSession(
 	llmManager *llm.Manager,
 	ttsProvider tts.Provider,
 	persistFunc func(role, content string) error,
+	turnDiagnosticPersist func(input *turntrace.CreateInput) error,
 ) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Session{
-		conn:               conn,
-		config:             config,
-		state:              StateIdle,
-		asrProvider:        asrProvider,
-		llmManager:         llmManager,
-		ttsProvider:        ttsProvider,
-		persistFunc:        persistFunc,
-		messages:           make([]llm.Message, 0),
-		livePersistEnabled: persistFunc != nil,
-		ctx:                ctx,
-		cancel:             cancel,
+		conn:                  conn,
+		config:                config,
+		state:                 StateIdle,
+		asrProvider:           asrProvider,
+		llmManager:            llmManager,
+		ttsProvider:           ttsProvider,
+		persistFunc:           persistFunc,
+		messages:              make([]llm.Message, 0),
+		livePersistEnabled:    persistFunc != nil,
+		ctx:                   ctx,
+		cancel:                cancel,
+		turnDiagnosticPersist: turnDiagnosticPersist,
 	}
 }
 
@@ -203,6 +210,8 @@ func (s *Session) ensureASRStream() error {
 			if result.IsFinal {
 				if result.Text != "" {
 					s.currentUserText.WriteString(result.Text)
+					now := time.Now()
+					s.lastASRFinalAt = &now
 				}
 				s.currentASRText = ""
 			} else if result.Text != "" {
@@ -328,21 +337,96 @@ func (s *Session) handleAudio(audioBase64 string) error {
 	return nil
 }
 
+type ttsSynthesisResult struct {
+	audio        []byte
+	firstChunkAt *time.Time
+	completedAt  *time.Time
+}
+
+type turnDiagnosticState struct {
+	turnIndex       int
+	outcome         turntrace.Outcome
+	userTextSource  turntrace.UserTextSource
+	userText        string
+	assistantText   string
+	userStopAt      time.Time
+	asrFinalAt      *time.Time
+	llmStartedAt    *time.Time
+	llmCompletedAt  *time.Time
+	ttsStartedAt    *time.Time
+	ttsFirstChunkAt *time.Time
+	ttsCompletedAt  *time.Time
+	doneSentAt      *time.Time
+	errorStage      *string
+	errorMessage    *string
+}
+
+func (s *Session) newTurnDiagnostic(stopAt time.Time) *turnDiagnosticState {
+	s.turnIndex++
+	return &turnDiagnosticState{
+		turnIndex:      s.turnIndex,
+		outcome:        turntrace.OutcomeCompleted,
+		userTextSource: turntrace.UserTextSourceEmpty,
+		userStopAt:     stopAt,
+	}
+}
+
+func (s *Session) persistTurnDiagnostic(state *turnDiagnosticState) {
+	if state == nil || s.turnDiagnosticPersist == nil {
+		return
+	}
+
+	input := &turntrace.CreateInput{
+		TurnIndex:        state.turnIndex,
+		Mode:             string(s.config.Mode),
+		Outcome:          state.outcome,
+		UserTextSource:   state.userTextSource,
+		UserTextPreview:  strings.TrimSpace(state.userText),
+		UserTextLength:   len([]rune(strings.TrimSpace(state.userText))),
+		AssistantPreview: strings.TrimSpace(state.assistantText),
+		AssistantLength:  len([]rune(strings.TrimSpace(state.assistantText))),
+		UserStopAt:       state.userStopAt,
+		ASRFinalAt:       state.asrFinalAt,
+		LLMStartedAt:     state.llmStartedAt,
+		LLMCompletedAt:   state.llmCompletedAt,
+		TTSStartedAt:     state.ttsStartedAt,
+		TTSFirstChunkAt:  state.ttsFirstChunkAt,
+		TTSCompletedAt:   state.ttsCompletedAt,
+		DoneSentAt:       state.doneSentAt,
+		ErrorStage:       state.errorStage,
+		ErrorMessage:     state.errorMessage,
+	}
+	if err := s.turnDiagnosticPersist(input); err != nil {
+		log.Printf("[Session] 保存轮次诊断失败: turn=%d err=%v", state.turnIndex, err)
+	}
+}
+
 // finishUserTurn 完成用户输入，开始生成回复
 func (s *Session) finishUserTurn() error {
+	turnState := s.newTurnDiagnostic(time.Now())
+
 	// 每轮 stop 后主动结束当前 ASR 会话，避免上游 idle timeout 影响下一轮。
 	s.closeASRStream()
-	userText := s.collectUserTextWithGrace()
+	userText, userTextSource, asrFinalAt := s.collectUserTextWithGrace()
+	turnState.userText = userText
+	turnState.userTextSource = userTextSource
+	turnState.asrFinalAt = asrFinalAt
 
 	if userText == "" {
 		log.Printf("[Session] stop 收到但未识别到文本，结束本轮并继续监听")
 		s.setState(StateListening, "stop 后无识别文本")
+		doneAt := time.Now()
 		s.sendDone()
+		turnState.outcome = turntrace.OutcomeEmptyInput
+		turnState.doneSentAt = &doneAt
+		s.persistTurnDiagnostic(turnState)
 		return nil
 	}
 
 	log.Printf("[Session] 用户文本确认: len=%d", len(userText))
 	s.setState(StateThinking, "用户文本已确认，准备调用 LLM")
+	llmStartedAt := time.Now()
+	turnState.llmStartedAt = &llmStartedAt
 
 	// 添加用户消息
 	s.mu.Lock()
@@ -357,6 +441,10 @@ func (s *Session) finishUserTurn() error {
 	provider, err := s.llmManager.Primary()
 	if err != nil {
 		s.setState(StateListening, "LLM provider 获取失败")
+		turnState.outcome = turntrace.OutcomeLLMError
+		turnState.errorStage = stringPtr("llm")
+		turnState.errorMessage = stringPtr(err.Error())
+		s.persistTurnDiagnostic(turnState)
 		return fmt.Errorf("LLM not available: %w", err)
 	}
 
@@ -382,8 +470,14 @@ func (s *Session) finishUserTurn() error {
 	resp, usedProvider, err := s.llmManager.ChatWithRetry(s.ctx, inferenceMessages, 3)
 	if err != nil {
 		s.setState(StateListening, "LLM 调用失败")
+		turnState.outcome = turntrace.OutcomeLLMError
+		turnState.errorStage = stringPtr("llm")
+		turnState.errorMessage = stringPtr(err.Error())
+		s.persistTurnDiagnostic(turnState)
 		return fmt.Errorf("LLM chat: %w", err)
 	}
+	llmCompletedAt := time.Now()
+	turnState.llmCompletedAt = &llmCompletedAt
 	if usedProvider != provider.Name() {
 		log.Printf("[Session] LLM 实际使用 provider=%s", usedProvider)
 	}
@@ -398,6 +492,7 @@ func (s *Session) finishUserTurn() error {
 		}
 	}
 	log.Printf("[Session] LLM 回复完成: len=%d", len(assistantText))
+	turnState.assistantText = assistantText
 
 	// 添加助手消息
 	s.mu.Lock()
@@ -413,12 +508,26 @@ func (s *Session) finishUserTurn() error {
 
 	// TTS 合成
 	s.setState(StateSpeaking, "LLM 完成，开始 TTS")
-	if _, err := s.synthesizeAndSend(assistantText); err != nil {
+	if s.ttsProvider != nil {
+		ttsStartedAt := time.Now()
+		turnState.ttsStartedAt = &ttsStartedAt
+	}
+	ttsResult, err := s.synthesizeAndSend(assistantText)
+	if err != nil {
 		log.Printf("[Session] TTS 错误: %v", err)
+		turnState.outcome = turntrace.OutcomeTTSError
+		turnState.errorStage = stringPtr("tts")
+		turnState.errorMessage = stringPtr(err.Error())
+	} else if ttsResult != nil {
+		turnState.ttsFirstChunkAt = ttsResult.firstChunkAt
+		turnState.ttsCompletedAt = ttsResult.completedAt
 	}
 
 	// 发送完成信号
+	doneAt := time.Now()
 	s.sendDone()
+	turnState.doneSentAt = &doneAt
+	s.persistTurnDiagnostic(turnState)
 
 	// 如果模型调用了结束工具，发送结束消息给前端
 	if shouldEndConversation {
@@ -614,17 +723,20 @@ func (s *Session) synthesizeAndSendGreeting(text string) error {
 		return nil
 	}
 
-	audioData, err := s.synthesizeAndSend(text)
+	result, err := s.synthesizeAndSend(text)
 	if err != nil {
 		return err
 	}
+	if result == nil {
+		return nil
+	}
 
-	storeGreetingAudioToCache(cacheKey, audioData)
+	storeGreetingAudioToCache(cacheKey, result.audio)
 	return nil
 }
 
 // synthesizeAndSend TTS 合成并发送
-func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
+func (s *Session) synthesizeAndSend(text string) (*ttsSynthesisResult, error) {
 	if s.ttsProvider == nil {
 		return nil, nil // TTS 不可用时静默跳过
 	}
@@ -639,7 +751,7 @@ func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
 	}
 
 	receivedAnyAudio := false
-	var fullAudio []byte
+	result := &ttsSynthesisResult{}
 	chunkCount := 0
 	for chunk := range audioChan {
 		if chunk.Error != nil {
@@ -649,11 +761,17 @@ func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
 		if len(chunk.Data) > 0 {
 			receivedAnyAudio = true
 			chunkCount++
-			fullAudio = append(fullAudio, chunk.Data...)
+			if result.firstChunkAt == nil {
+				firstChunkAt := time.Now()
+				result.firstChunkAt = &firstChunkAt
+			}
+			result.audio = append(result.audio, chunk.Data...)
 			s.sendTTS(chunk.Data, realtimeTTSSampleRate)
 		}
 
 		if chunk.Done {
+			completedAt := time.Now()
+			result.completedAt = &completedAt
 			break
 		}
 	}
@@ -661,9 +779,13 @@ func (s *Session) synthesizeAndSend(text string) ([]byte, error) {
 	if !receivedAnyAudio {
 		return nil, fmt.Errorf("TTS stream: no audio data received")
 	}
-	log.Printf("[Session] TTS 输出完成: chunks=%d bytes=%d", chunkCount, len(fullAudio))
+	if result.completedAt == nil {
+		completedAt := time.Now()
+		result.completedAt = &completedAt
+	}
+	log.Printf("[Session] TTS 输出完成: chunks=%d bytes=%d", chunkCount, len(result.audio))
 
-	return fullAudio, nil
+	return result, nil
 }
 
 // GetMessages 获取对话历史
@@ -810,7 +932,7 @@ func truncateForLog(s string, maxLen int) string {
 }
 
 // stop 后给 ASR 一小段收尾时间，尽量拿到 SentenceEnd 最终文本，减少尾字丢失。
-func (s *Session) collectUserTextWithGrace() string {
+func (s *Session) collectUserTextWithGrace() (string, turntrace.UserTextSource, *time.Time) {
 	readBuffers := func() (string, string) {
 		s.asrTextMu.Lock()
 		defer s.asrTextMu.Unlock()
@@ -837,11 +959,24 @@ func (s *Session) collectUserTextWithGrace() string {
 
 	finalText := strings.TrimSpace(s.currentUserText.String())
 	interimText := strings.TrimSpace(s.currentASRText)
+	asrFinalAt := s.lastASRFinalAt
 	s.currentUserText.Reset()
 	s.currentASRText = ""
+	s.lastASRFinalAt = nil
 
 	if finalText != "" {
-		return finalText
+		return finalText, turntrace.UserTextSourceFinal, asrFinalAt
 	}
-	return interimText
+	if interimText != "" {
+		return interimText, turntrace.UserTextSourceInterim, asrFinalAt
+	}
+	return "", turntrace.UserTextSourceEmpty, asrFinalAt
+}
+
+func stringPtr(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	v := value
+	return &v
 }

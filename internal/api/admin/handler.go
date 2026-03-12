@@ -35,26 +35,28 @@ import (
 	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
+	turnTraceService "github.com/peizhengma/biography-v2/internal/service/turntrace"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
 )
 
 // Handler Admin API 处理器
 type Handler struct {
-	llmManager     *llm.Manager
-	asrProvider    asr.Provider
-	ttsProvider    tts.Provider
-	userService    *userService.Service
-	convService    *convService.Service
-	memoirService  *memoirService.Service
-	topicService   *topicService.Service
-	quoteService   *quoteService.Service
-	flowService    *flowService.Service
-	llmService     *llmService.Service
-	eraService     *eraService.Service
-	presetService  *presetService.Service
-	welcomeService *welcomeService.Service
-	auditService   *auditService.Service
+	llmManager       *llm.Manager
+	asrProvider      asr.Provider
+	ttsProvider      tts.Provider
+	userService      *userService.Service
+	convService      *convService.Service
+	memoirService    *memoirService.Service
+	topicService     *topicService.Service
+	quoteService     *quoteService.Service
+	flowService      *flowService.Service
+	llmService       *llmService.Service
+	eraService       *eraService.Service
+	presetService    *presetService.Service
+	welcomeService   *welcomeService.Service
+	auditService     *auditService.Service
+	turnTraceService *turnTraceService.Service
 }
 
 // NewHandler 创建 Admin Handler
@@ -73,22 +75,24 @@ func NewHandler(
 	presetSvc *presetService.Service,
 	welcomeSvc *welcomeService.Service,
 	auditSvc *auditService.Service,
+	turnTraceSvc *turnTraceService.Service,
 ) *Handler {
 	return &Handler{
-		llmManager:     llmManager,
-		asrProvider:    asrProvider,
-		ttsProvider:    ttsProvider,
-		userService:    userSvc,
-		convService:    convSvc,
-		memoirService:  memoirSvc,
-		topicService:   topicSvc,
-		quoteService:   quoteSvc,
-		flowService:    flowSvc,
-		llmService:     llmSvc,
-		eraService:     eraSvc,
-		presetService:  presetSvc,
-		welcomeService: welcomeSvc,
-		auditService:   auditSvc,
+		llmManager:       llmManager,
+		asrProvider:      asrProvider,
+		ttsProvider:      ttsProvider,
+		userService:      userSvc,
+		convService:      convSvc,
+		memoirService:    memoirSvc,
+		topicService:     topicSvc,
+		quoteService:     quoteSvc,
+		flowService:      flowSvc,
+		llmService:       llmSvc,
+		eraService:       eraSvc,
+		presetService:    presetSvc,
+		welcomeService:   welcomeSvc,
+		auditService:     auditSvc,
+		turnTraceService: turnTraceSvc,
 	}
 }
 
@@ -570,6 +574,13 @@ func (h *Handler) GetConversation(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+
+	turnDiagnostics, err := h.turnTraceService.ListByConversationID(c.Request.Context(), convID, 200)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	conv.TurnDiagnostics = turnDiagnostics
 
 	c.JSON(http.StatusOK, conv)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/peizhengma/biography-v2/internal/domain/conversation"
+	"github.com/peizhengma/biography-v2/internal/domain/turntrace"
 	userDomain "github.com/peizhengma/biography-v2/internal/domain/user"
 	"github.com/peizhengma/biography-v2/internal/provider/asr"
 	"github.com/peizhengma/biography-v2/internal/provider/llm"
@@ -21,6 +22,7 @@ import (
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
+	turnTraceService "github.com/peizhengma/biography-v2/internal/service/turntrace"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 )
 
@@ -35,15 +37,16 @@ var upgrader = websocket.Upgrader{
 
 // Handler 实时对话处理器
 type Handler struct {
-	jwtSecret     string
-	userService   *userService.Service
-	topicService  *topicService.Service
-	convService   *convService.Service
-	memoirService *memoirService.Service
-	llmService    *llmService.Service
-	asrProvider   asr.Provider
-	llmManager    *llm.Manager
-	ttsProvider   tts.Provider
+	jwtSecret        string
+	userService      *userService.Service
+	topicService     *topicService.Service
+	convService      *convService.Service
+	memoirService    *memoirService.Service
+	turnTraceService *turnTraceService.Service
+	llmService       *llmService.Service
+	asrProvider      asr.Provider
+	llmManager       *llm.Manager
+	ttsProvider      tts.Provider
 }
 
 // NewHandler 创建处理器
@@ -53,21 +56,23 @@ func NewHandler(
 	topicSvc *topicService.Service,
 	convSvc *convService.Service,
 	memoirSvc *memoirService.Service,
+	turnTraceSvc *turnTraceService.Service,
 	llmSvc *llmService.Service,
 	asrProvider asr.Provider,
 	llmManager *llm.Manager,
 	ttsProvider tts.Provider,
 ) *Handler {
 	return &Handler{
-		jwtSecret:     jwtSecret,
-		userService:   userSvc,
-		topicService:  topicSvc,
-		convService:   convSvc,
-		memoirService: memoirSvc,
-		llmService:    llmSvc,
-		asrProvider:   asrProvider,
-		llmManager:    llmManager,
-		ttsProvider:   ttsProvider,
+		jwtSecret:        jwtSecret,
+		userService:      userSvc,
+		topicService:     topicSvc,
+		convService:      convSvc,
+		memoirService:    memoirSvc,
+		turnTraceService: turnTraceSvc,
+		llmService:       llmSvc,
+		asrProvider:      asrProvider,
+		llmManager:       llmManager,
+		ttsProvider:      ttsProvider,
 	}
 }
 
@@ -182,6 +187,7 @@ func (h *Handler) HandleDialog(c *gin.Context) {
 		h.llmManager,
 		h.ttsProvider,
 		h.makeMessagePersistor(convID),
+		h.makeTurnDiagnosticPersistor(convID, userID),
 	)
 
 	// 运行会话
@@ -311,6 +317,22 @@ func (h *Handler) makeMessagePersistor(conversationID uuid.UUID) func(role, cont
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, err := h.convService.AddMessage(ctx, conversationID, role, content)
+		return err
+	}
+}
+
+func (h *Handler) makeTurnDiagnosticPersistor(conversationID, userID uuid.UUID) func(input *turntrace.CreateInput) error {
+	if conversationID == uuid.Nil || userID == uuid.Nil || h.turnTraceService == nil {
+		return nil
+	}
+
+	return func(input *turntrace.CreateInput) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		input.ConversationID = conversationID
+		input.UserID = userID
+		_, err := h.turnTraceService.Create(ctx, input)
 		return err
 	}
 }

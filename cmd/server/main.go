@@ -25,6 +25,7 @@ import (
 	presetRepo "github.com/peizhengma/biography-v2/internal/repository/preset"
 	quoteRepo "github.com/peizhengma/biography-v2/internal/repository/quote"
 	topicRepo "github.com/peizhengma/biography-v2/internal/repository/topic"
+	turnTraceRepo "github.com/peizhengma/biography-v2/internal/repository/turntrace"
 	userRepo "github.com/peizhengma/biography-v2/internal/repository/user"
 	welcomeRepo "github.com/peizhengma/biography-v2/internal/repository/welcome"
 	auditService "github.com/peizhengma/biography-v2/internal/service/audit"
@@ -36,6 +37,7 @@ import (
 	presetService "github.com/peizhengma/biography-v2/internal/service/preset"
 	quoteService "github.com/peizhengma/biography-v2/internal/service/quote"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
+	turnTraceService "github.com/peizhengma/biography-v2/internal/service/turntrace"
 	userService "github.com/peizhengma/biography-v2/internal/service/user"
 	welcomeService "github.com/peizhengma/biography-v2/internal/service/welcome"
 	"github.com/peizhengma/biography-v2/internal/storage/postgres"
@@ -76,6 +78,9 @@ func main() {
 	topicRepository := topicRepo.New(db.Pool())
 	topicSvc := topicService.New(topicRepository)
 
+	turnTraceRepository := turnTraceRepo.New(db.Pool())
+	turnTraceSvc := turnTraceService.New(turnTraceRepository)
+
 	quoteRepository := quoteRepo.New(db.Pool())
 	quoteSvc := quoteService.New(quoteRepository)
 
@@ -115,6 +120,7 @@ func main() {
 		WelcomeService:      welcomeSvc,
 		AuditService:        auditSvc,
 		FlowService:         flowSvc,
+		TurnTraceService:    turnTraceSvc,
 	})
 
 	// 创建 HTTP 服务器
