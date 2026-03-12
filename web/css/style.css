@@ -1220,10 +1220,11 @@ body {
     background: var(--color-accent);
     color: #fff;
     border: 1px solid var(--color-accent);
-    display: inline-flex;
+    display: inline-flex !important;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 8px;
+    overflow: visible;
 }
 
 .topic-refresh-btn:hover:not(:disabled) {
@@ -1243,6 +1244,8 @@ body {
     stroke: currentColor;
     fill: none;
     stroke-width: 1.8;
+    flex-shrink: 0;
+    overflow: visible;
 }
 
 .topic-refresh-btn.is-refreshing svg {

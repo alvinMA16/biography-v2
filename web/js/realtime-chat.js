@@ -590,6 +590,9 @@ function stopRecording() {
         audioContext = null;
     }
 
+    // 重置 AudioWorklet 模块 URL，下次录音时重新创建
+    audioWorkletModuleURL = null;
+
     if (mediaStream) {
         mediaStream.getTracks().forEach(track => track.stop());
         mediaStream = null;
