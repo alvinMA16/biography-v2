@@ -873,6 +873,16 @@ body {
     min-height: 0;
 }
 
+.chat-page-header {
+    position: relative;
+    padding-top: 0.7em;
+    padding-bottom: 0.7em;
+}
+
+.chat-page-header .btn-back {
+    padding: 0.32em 0.72em;
+}
+
 .chat-page-header .header-title {
     position: absolute;
     left: 50%;
@@ -888,7 +898,7 @@ body {
     display: inline-block;
     font-size: var(--font-size-small);
     font-family: var(--font-sans);
-    padding: 0.4em 0.8em;
+    padding: 0.32em 0.72em;
     border: 1px solid transparent;
     min-width: 2em;
     text-align: center;
