@@ -1106,6 +1106,8 @@ function renderApiMonitorRow(item) {
     const providerLabelMap = {
         dashscope: '千问(DashScope)',
         gemini: 'Gemini',
+        'gemini-realtime-preview': 'Gemini 对冲 1',
+        'gemini-realtime-fast': 'Gemini 对冲 2',
         aliyun: '阿里云',
         doubao: '豆包',
     };

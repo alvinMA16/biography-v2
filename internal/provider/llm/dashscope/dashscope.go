@@ -17,11 +17,10 @@ import (
 
 // Provider DashScope LLM 提供者 (阿里通义千问，使用 OpenAI 兼容 API)
 type Provider struct {
-	apiKey    string
-	baseURL   string
-	model     string
-	modelFast string
-	client    *http.Client
+	apiKey  string
+	baseURL string
+	model   string
+	client  *http.Client
 }
 
 // New 创建 DashScope 提供者
@@ -36,7 +35,6 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	}
 
 	model := cfg.Model
-	modelFast := cfg.ModelFast
 
 	timeout := cfg.Timeout
 	if timeout == 0 {
@@ -44,10 +42,9 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	}
 
 	return &Provider{
-		apiKey:    cfg.APIKey,
-		baseURL:   strings.TrimSuffix(baseURL, "/"),
-		model:     model,
-		modelFast: modelFast,
+		apiKey:  cfg.APIKey,
+		baseURL: strings.TrimSuffix(baseURL, "/"),
+		model:   model,
 		client: &http.Client{
 			Timeout: time.Duration(timeout) * time.Second,
 		},
@@ -360,13 +357,12 @@ func (p *Provider) HealthCheck(ctx context.Context) error {
 		{Role: "user", Content: "ping"},
 	}
 
-	// 使用快速模型进行健康检查
 	chatMessages := []chatMessage{
 		{Role: "user", Content: "ping"},
 	}
 
 	reqBody := chatRequest{
-		Model:    p.modelFast,
+		Model:    p.model,
 		Messages: chatMessages,
 		Stream:   false,
 	}

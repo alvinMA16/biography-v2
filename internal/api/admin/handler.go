@@ -1191,10 +1191,14 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 14*time.Second)
 	defer cancel()
 
-	// 预分配固定 4 个槽位：[gemini, dashscope, asr, tts]，保证顺序稳定。
-	items := make([]APIItem, 4)
-
-	llmTargets := []string{"gemini", "dashscope"}
+	llmTargets := []string{
+		"gemini",
+		llm.ProviderGeminiRealtimePreview,
+		llm.ProviderGeminiRealtimeFast,
+		"dashscope",
+	}
+	// [llm targets..., asr, tts]
+	items := make([]APIItem, len(llmTargets)+2)
 
 	primaryProvider := ""
 	if h.llmManager != nil {
@@ -1275,7 +1279,8 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 	}
 
 	// --- ASR provider (并行) ---
-	asrItem := &items[2]
+	asrIndex := len(llmTargets)
+	asrItem := &items[asrIndex]
 	if h.asrProvider != nil {
 		*asrItem = APIItem{
 			ID:               "asr",
@@ -1320,7 +1325,7 @@ func (h *Handler) ListAPIs(c *gin.Context) {
 	}
 
 	// --- TTS provider (并行) ---
-	ttsItem := &items[3]
+	ttsItem := &items[asrIndex+1]
 	if h.ttsProvider != nil {
 		*ttsItem = APIItem{
 			ID:               "tts",

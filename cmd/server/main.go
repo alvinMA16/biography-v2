@@ -170,11 +170,10 @@ func initLLMProviders(cfg *config.Config) *llm.Manager {
 	// 初始化 Gemini
 	if cfg.GeminiAPIKey != "" {
 		geminiProvider, err := gemini.New(llm.ProviderConfig{
-			APIKey:    cfg.GeminiAPIKey,
-			Model:     cfg.GeminiModel,
-			ModelFast: cfg.GeminiModelFast,
-			Proxy:     cfg.GeminiProxy,
-			Timeout:   60,
+			APIKey:  cfg.GeminiAPIKey,
+			Model:   cfg.GeminiModel,
+			Proxy:   cfg.GeminiProxy,
+			Timeout: 60,
 		})
 		if err != nil {
 			log.Printf("Warning: Failed to initialize Gemini provider: %v", err)
@@ -185,11 +184,10 @@ func initLLMProviders(cfg *config.Config) *llm.Manager {
 
 		if cfg.GeminiRealtimeHedgeModel1 != "" {
 			hedgeProvider, err := gemini.New(llm.ProviderConfig{
-				APIKey:    cfg.GeminiAPIKey,
-				Model:     cfg.GeminiRealtimeHedgeModel1,
-				ModelFast: cfg.GeminiModelFast,
-				Proxy:     cfg.GeminiProxy,
-				Timeout:   60,
+				APIKey:  cfg.GeminiAPIKey,
+				Model:   cfg.GeminiRealtimeHedgeModel1,
+				Proxy:   cfg.GeminiProxy,
+				Timeout: 60,
 			})
 			if err != nil {
 				log.Printf("Warning: Failed to initialize Gemini realtime hedge provider 1: %v", err)
@@ -201,11 +199,10 @@ func initLLMProviders(cfg *config.Config) *llm.Manager {
 
 		if cfg.GeminiRealtimeHedgeModel2 != "" {
 			hedgeProvider, err := gemini.New(llm.ProviderConfig{
-				APIKey:    cfg.GeminiAPIKey,
-				Model:     cfg.GeminiRealtimeHedgeModel2,
-				ModelFast: cfg.GeminiModelFast,
-				Proxy:     cfg.GeminiProxy,
-				Timeout:   60,
+				APIKey:  cfg.GeminiAPIKey,
+				Model:   cfg.GeminiRealtimeHedgeModel2,
+				Proxy:   cfg.GeminiProxy,
+				Timeout: 60,
 			})
 			if err != nil {
 				log.Printf("Warning: Failed to initialize Gemini realtime hedge provider 2: %v", err)
@@ -219,11 +216,10 @@ func initLLMProviders(cfg *config.Config) *llm.Manager {
 	// 初始化 DashScope
 	if cfg.DashScopeAPIKey != "" {
 		dashscopeProvider, err := dashscope.New(llm.ProviderConfig{
-			APIKey:    cfg.DashScopeAPIKey,
-			BaseURL:   cfg.DashScopeBaseURL,
-			Model:     cfg.DashScopeModel,
-			ModelFast: cfg.DashScopeModelFast,
-			Timeout:   60,
+			APIKey:  cfg.DashScopeAPIKey,
+			BaseURL: cfg.DashScopeBaseURL,
+			Model:   cfg.DashScopeModel,
+			Timeout: 60,
 		})
 		if err != nil {
 			log.Printf("Warning: Failed to initialize DashScope provider: %v", err)

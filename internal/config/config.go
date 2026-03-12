@@ -28,16 +28,14 @@ type Config struct {
 	// Gemini
 	GeminiAPIKey              string
 	GeminiModel               string
-	GeminiModelFast           string
 	GeminiRealtimeHedgeModel1 string
 	GeminiRealtimeHedgeModel2 string
 	GeminiProxy               string
 
 	// DashScope (阿里通义)
-	DashScopeAPIKey    string
-	DashScopeBaseURL   string
-	DashScopeModel     string
-	DashScopeModelFast string
+	DashScopeAPIKey  string
+	DashScopeBaseURL string
+	DashScopeModel   string
 
 	// ASR (阿里语音识别)
 	AliyunAccessKeyID     string
@@ -68,15 +66,13 @@ func Load() (*Config, error) {
 
 		GeminiAPIKey:              getEnv("GEMINI_API_KEY", ""),
 		GeminiModel:               getEnv("GEMINI_MODEL", "gemini-3.1-flash-image-preview"),
-		GeminiModelFast:           getEnv("GEMINI_MODEL_FAST", "gemini-2.0-flash-lite"),
 		GeminiRealtimeHedgeModel1: getEnv("GEMINI_REALTIME_HEDGE_MODEL_1", "gemini-3-flash-preview"),
 		GeminiRealtimeHedgeModel2: getEnv("GEMINI_REALTIME_HEDGE_MODEL_2", "gemini-2.5-flash"),
 		GeminiProxy:               getEnv("GEMINI_PROXY", ""),
 
-		DashScopeAPIKey:    getEnv("DASHSCOPE_API_KEY", ""),
-		DashScopeBaseURL:   getEnv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-		DashScopeModel:     getEnv("DASHSCOPE_MODEL", "qwen3.5-plus"),
-		DashScopeModelFast: getEnv("DASHSCOPE_MODEL_FAST", "qwen-turbo"),
+		DashScopeAPIKey:  getEnv("DASHSCOPE_API_KEY", ""),
+		DashScopeBaseURL: getEnv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+		DashScopeModel:   getEnv("DASHSCOPE_MODEL", "qwen3.5-plus"),
 
 		AliyunAccessKeyID:     getEnv("ALIYUN_ACCESS_KEY_ID", ""),
 		AliyunAccessKeySecret: getEnv("ALIYUN_ACCESS_KEY_SECRET", ""),

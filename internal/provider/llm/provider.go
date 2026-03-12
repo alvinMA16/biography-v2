@@ -90,10 +90,9 @@ func WithAlias(name string, provider Provider) Provider {
 
 // ProviderConfig 提供者配置
 type ProviderConfig struct {
-	APIKey    string
-	BaseURL   string
-	Model     string
-	ModelFast string
-	Proxy     string
-	Timeout   int // seconds
+	APIKey  string
+	BaseURL string
+	Model   string
+	Proxy   string
+	Timeout int // seconds
 }

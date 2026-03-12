@@ -27,7 +27,6 @@ type Provider struct {
 	rawTrans    *http.Transport
 	apiKey      string
 	model       string
-	modelFast   string
 	proxy       string
 }
 
@@ -113,7 +112,6 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 	}
 
 	model := cfg.Model
-	modelFast := cfg.ModelFast
 
 	// 创建共享 HTTP 客户端（用于 RawGenerate 等直接 HTTP 调用）
 	rawTransport, err := buildTransport(cfg.Proxy)
@@ -132,7 +130,6 @@ func New(cfg llm.ProviderConfig) (*Provider, error) {
 		rawTrans:    rawTransport,
 		apiKey:      cfg.APIKey,
 		model:       model,
-		modelFast:   modelFast,
 		proxy:       cfg.Proxy,
 	}, nil
 }
@@ -375,7 +372,7 @@ func (p *Provider) ChatStream(ctx context.Context, messages []llm.Message) (<-ch
 
 // HealthCheck 健康检查
 func (p *Provider) HealthCheck(ctx context.Context) error {
-	model := p.client.GenerativeModel(p.modelFast)
+	model := p.client.GenerativeModel(p.model)
 
 	_, err := model.GenerateContent(ctx, genai.Text("ping"))
 	if err != nil {
