@@ -255,6 +255,13 @@ function renderTopicOptions(options, hasMore, isRefreshing) {
     const container = document.getElementById('topicOptions');
     const refreshDisabled = isRefreshing || !hasMore;
     const refreshLabel = isRefreshing ? '正在换一批...' : (hasMore ? '换一批' : '先看看这些');
+    const refreshClass = isRefreshing ? 'btn topic-refresh-btn is-refreshing' : 'btn topic-refresh-btn';
+    const refreshIcon = `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 5v6h-6"></path>
+            <path d="M20 11a8 8 0 1 0 2 5.5"></path>
+        </svg>
+    `;
 
     container.innerHTML = options.map((opt, index) => `
         <div class="topic-option" onclick="selectTopicByIndex(${index})">
@@ -265,7 +272,10 @@ function renderTopicOptions(options, hasMore, isRefreshing) {
             <div class="topic-title">我有其他想说的</div>
         </div>
         <div class="topic-actions">
-            <button class="btn btn-secondary topic-refresh-btn" onclick="loadTopicOptions()" ${refreshDisabled ? 'disabled' : ''}>${refreshLabel}</button>
+            <button class="${refreshClass}" onclick="loadTopicOptions()" ${refreshDisabled ? 'disabled' : ''}>
+                ${refreshIcon}
+                <span>${refreshLabel}</span>
+            </button>
         </div>
     `;
 }
