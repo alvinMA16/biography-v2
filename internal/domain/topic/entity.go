@@ -24,6 +24,10 @@ const (
 	SourceManual Source = "manual"
 )
 
+const (
+	OptionSourcePreset = "preset"
+)
+
 // TopicCandidate 话题候选实体
 type TopicCandidate struct {
 	ID     uuid.UUID `json:"id" db:"id"`
@@ -51,6 +55,7 @@ type TopicOption struct {
 	Greeting   string    `json:"greeting"`
 	Context    string    `json:"context"`
 	EraContext string    `json:"era_context"`
+	Source     string    `json:"source,omitempty"`
 }
 
 // CreateTopicInput 创建话题输入

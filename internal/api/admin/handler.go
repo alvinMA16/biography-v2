@@ -488,7 +488,7 @@ func (h *Handler) RegenerateUserTopicPool(c *gin.Context) {
 		return
 	}
 
-	if err := h.flowService.RegenerateTopicPoolForUser(ctx, userID, 5); err != nil {
+	if err := h.flowService.RegenerateTopicPoolForUser(ctx, userID, 9); err != nil {
 		if strings.Contains(err.Error(), "has no memoirs") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "用户还没有足够的回忆内容，暂时无法生成话题池"})
 			return

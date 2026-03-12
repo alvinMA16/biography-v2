@@ -207,6 +207,17 @@ func (s *Service) MarkAsUsed(ctx context.Context, id uuid.UUID) error {
 	return s.repo.UpdateStatus(ctx, id, topic.StatusUsed)
 }
 
+// MarkAsUsedForUser 标记用户的话题为已使用
+func (s *Service) MarkAsUsedForUser(ctx context.Context, id, userID uuid.UUID) error {
+	t, err := s.GetByIDForUser(ctx, id, userID)
+	if err != nil {
+		return err
+	}
+	_ = t
+
+	return s.repo.UpdateStatus(ctx, id, topic.StatusUsed)
+}
+
 // GetPendingCount 获取待审核话题数量
 func (s *Service) GetPendingCount(ctx context.Context, userID uuid.UUID) (int, error) {
 	return s.repo.CountByStatus(ctx, userID, topic.StatusPending)
@@ -261,6 +272,7 @@ func candidateToOption(candidate *topic.TopicCandidate) topic.TopicOption {
 		Greeting:   deref(candidate.Greeting),
 		Context:    deref(candidate.Context),
 		EraContext: deref(candidate.EraContext),
+		Source:     string(candidate.Source),
 	}
 }
 

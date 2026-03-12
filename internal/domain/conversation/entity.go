@@ -47,7 +47,7 @@ type Message struct {
 	ConversationID uuid.UUID `json:"conversation_id" db:"conversation_id"`
 
 	// 消息内容
-	Role    string `json:"role" db:"role"`    // user, assistant
+	Role    string `json:"role" db:"role"` // user, assistant
 	Content string `json:"content" db:"content"`
 
 	// 时间戳
@@ -56,9 +56,11 @@ type Message struct {
 
 // CreateConversationInput 创建对话输入
 type CreateConversationInput struct {
-	Topic    string `json:"topic"`
-	Greeting string `json:"greeting"`
-	Context  string `json:"context"`
+	Topic       string `json:"topic"`
+	Greeting    string `json:"greeting"`
+	Context     string `json:"context"`
+	TopicID     string `json:"topic_id"`
+	TopicSource string `json:"topic_source"`
 }
 
 // ListConversationsFilter 对话列表过滤条件

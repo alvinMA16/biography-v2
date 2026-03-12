@@ -165,9 +165,16 @@ const TOPIC_MODAL_TITLES = [
     "您想讲讲哪方面的事？",
 ];
 
+const TOPIC_BATCH_SIZE = 3;
+
 function openTopicModal() {
     const modal = document.getElementById('topicModal');
     modal.style.display = 'flex';
+
+    window._topicOptions = [];
+    window._topicSeenIds = [];
+    window._topicHasMore = true;
+    window._topicLoading = false;
 
     // 随机选择标题
     const title = TOPIC_MODAL_TITLES[Math.floor(Math.random() * TOPIC_MODAL_TITLES.length)];
@@ -178,42 +185,63 @@ function openTopicModal() {
 
 function closeTopicModal() {
     document.getElementById('topicModal').style.display = 'none';
+    window._topicOptions = [];
+    window._topicSeenIds = [];
+    window._topicHasMore = true;
+    window._topicLoading = false;
 }
 
 async function loadTopicOptions() {
+    if (window._topicLoading) return;
+
     const container = document.getElementById('topicOptions');
-    container.innerHTML = `
-        <div class="topic-loading">
-            <div class="loading-dots"><span></span><span></span><span></span></div>
-            <p>正在回顾您的故事，请稍等</p>
-        </div>
-    `;
+    const currentOptions = window._topicOptions || [];
+    const loadingExisting = currentOptions.length > 0;
+
+    window._topicLoading = true;
+    if (loadingExisting) {
+        renderTopicOptions(currentOptions, true, true);
+    } else {
+        container.innerHTML = `
+            <div class="topic-loading">
+                <div class="loading-dots"><span></span><span></span><span></span></div>
+                <p>正在回顾您的故事，请稍等</p>
+            </div>
+        `;
+    }
 
     try {
-        const data = await api.topic.getOptions();
+        const data = await api.topic.nextBatch(window._topicSeenIds || [], TOPIC_BATCH_SIZE);
         const options = data.options || [];
 
         if (options.length === 0) {
-            container.innerHTML = '<p class="topic-empty">暂时没有准备好话题，请稍后再试</p>';
+            container.innerHTML = `
+                <p class="topic-empty">暂时没有准备好话题，您也可以直接开聊</p>
+                <div class="topic-option topic-option-free" onclick="selectFreeTopic()">
+                    <div class="topic-title">我有其他想说的</div>
+                </div>
+            `;
             return;
         }
 
-        // 保存选项数据供点击时使用
-        window._topicOptions = options;
+        const seenIds = new Set(window._topicSeenIds || []);
+        options.forEach(opt => {
+            if (opt.id) {
+                seenIds.add(opt.id);
+            }
+        });
 
-        container.innerHTML = options.map((opt, index) => `
-            <div class="topic-option" onclick="selectTopicByIndex(${index})">
-                <div class="topic-title">${escapeHtml(opt.topic)}</div>
-            </div>
-        `).join('') + `
-            <div class="topic-option topic-option-free" onclick="selectFreeTopic()">
-                <div class="topic-title">我有其他想说的</div>
-            </div>
-        `;
+        window._topicSeenIds = Array.from(seenIds);
+        window._topicOptions = options;
+        window._topicHasMore = data.has_more === true;
+
+        renderTopicOptions(options, window._topicHasMore, false);
 
     } catch (error) {
         console.error('加载话题失败:', error);
         container.innerHTML = '<p class="topic-empty">加载失败，请稍后重试</p>';
+    } finally {
+        window._topicLoading = false;
     }
 }
 
@@ -223,20 +251,39 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function renderTopicOptions(options, hasMore, isRefreshing) {
+    const container = document.getElementById('topicOptions');
+    const refreshDisabled = isRefreshing || !hasMore;
+    const refreshLabel = isRefreshing ? '正在换一批...' : (hasMore ? '换一批' : '先看看这些');
+
+    container.innerHTML = options.map((opt, index) => `
+        <div class="topic-option" onclick="selectTopicByIndex(${index})">
+            <div class="topic-title">${escapeHtml(opt.topic)}</div>
+        </div>
+    `).join('') + `
+        <div class="topic-option topic-option-free" onclick="selectFreeTopic()">
+            <div class="topic-title">我有其他想说的</div>
+        </div>
+        <div class="topic-actions">
+            <button class="btn btn-secondary topic-refresh-btn" onclick="loadTopicOptions()" ${refreshDisabled ? 'disabled' : ''}>${refreshLabel}</button>
+        </div>
+    `;
+}
+
 // 通过索引选择话题（避免 HTML 转义问题）
 async function selectTopicByIndex(index) {
     const options = window._topicOptions || [];
     if (index < 0 || index >= options.length) return;
 
     const opt = options[index];
-    await selectTopic(opt.id, opt.topic, opt.greeting, opt.context, opt.age_start, opt.age_end);
+    await selectTopic(opt.id, opt.topic, opt.greeting, opt.context, opt.source, opt.age_start, opt.age_end);
 }
 
 async function selectFreeTopic() {
-    await selectTopic(null, '__free__', '好的呀，今天我听您的。', '', null, null);
+    await selectTopic(null, '__free__', '好的呀，今天我听您的。', '', '', null, null);
 }
 
-async function selectTopic(topicId, topic, greeting, context, ageStart, ageEnd) {
+async function selectTopic(topicId, topic, greeting, context, topicSource, ageStart, ageEnd) {
     closeTopicModal();
 
     try {
@@ -246,6 +293,10 @@ async function selectTopic(topicId, topic, greeting, context, ageStart, ageEnd) 
             conversationInput.topic = topic;
             conversationInput.greeting = greeting || '';
             conversationInput.context = context || '';
+            if (topicId) {
+                conversationInput.topic_id = topicId;
+                conversationInput.topic_source = topicSource || '';
+            }
         }
         const result = await api.conversation.start(conversationInput);
         storage.set('currentConversationId', result.id);
@@ -254,12 +305,26 @@ async function selectTopic(topicId, topic, greeting, context, ageStart, ageEnd) 
         storage.set('selectedTopic', topic);
         storage.set('selectedTopicGreeting', greeting);
         storage.set('selectedTopicContext', context || '');
+        if (topicId) {
+            storage.set('selectedTopicId', topicId);
+        } else {
+            storage.remove('selectedTopicId');
+        }
+        if (topicSource) {
+            storage.set('selectedTopicSource', topicSource);
+        } else {
+            storage.remove('selectedTopicSource');
+        }
         // 存储年龄范围（用于截取时代记忆）
         if (ageStart !== null && ageStart !== undefined) {
             storage.set('selectedTopicAgeStart', ageStart);
+        } else {
+            storage.remove('selectedTopicAgeStart');
         }
         if (ageEnd !== null && ageEnd !== undefined) {
             storage.set('selectedTopicAgeEnd', ageEnd);
+        } else {
+            storage.remove('selectedTopicAgeEnd');
         }
 
         // 跳转到对话页面

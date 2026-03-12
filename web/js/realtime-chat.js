@@ -148,10 +148,14 @@ async function connectWebSocket() {
 
     // 获取选择的话题信息
     const selectedTopic = storage.get('selectedTopic');
+    const selectedTopicId = storage.get('selectedTopicId');
+    const selectedTopicSource = storage.get('selectedTopicSource');
     const selectedGreeting = storage.get('selectedTopicGreeting');
     const selectedContext = storage.get('selectedTopicContext');
     // 使用后清除，避免下次对话重复使用
     storage.remove('selectedTopic');
+    storage.remove('selectedTopicId');
+    storage.remove('selectedTopicSource');
     storage.remove('selectedTopicGreeting');
     storage.remove('selectedTopicContext');
 
@@ -169,6 +173,9 @@ async function connectWebSocket() {
     // 如果有选择的话题，添加到参数中
     if (selectedTopic) {
         params.set('topic', selectedTopic);
+    }
+    if (selectedTopicId && selectedTopicSource === 'ai') {
+        params.set('topic_id', selectedTopicId);
     }
     if (selectedGreeting) {
         params.set('greeting', selectedGreeting);

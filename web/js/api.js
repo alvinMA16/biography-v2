@@ -164,6 +164,33 @@ const api = {
                     topic: t.title,
                     greeting: t.greeting || '',
                     context: t.context || '',
+                    era_context: t.era_context || '',
+                    source: t.source || 'ai',
+                    age_start: t.age_start ?? null,
+                    age_end: t.age_end ?? null,
+                })),
+            };
+        },
+
+        async nextBatch(excludeTopicIds = [], batchSize = 3) {
+            const data = await api.request('/topics/next-batch', {
+                method: 'POST',
+                body: JSON.stringify({
+                    exclude_topic_ids: excludeTopicIds,
+                    batch_size: batchSize,
+                }),
+            });
+            const topics = data.topics || [];
+            return {
+                generated: data.generated === true,
+                has_more: data.has_more === true,
+                options: topics.map(t => ({
+                    id: t.id,
+                    topic: t.title,
+                    greeting: t.greeting || '',
+                    context: t.context || '',
+                    era_context: t.era_context || '',
+                    source: t.source || 'ai',
                     age_start: t.age_start ?? null,
                     age_end: t.age_end ?? null,
                 })),

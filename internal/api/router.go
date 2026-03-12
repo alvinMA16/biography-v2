@@ -107,6 +107,7 @@ func NewRouter(deps *RouterDeps) http.Handler {
 
 		// 话题
 		userRoutes.GET("/topics", userHandler.GetTopicOptions)
+		userRoutes.POST("/topics/next-batch", userHandler.NextTopicBatch)
 
 		// 激励语
 		userRoutes.GET("/user/welcome-messages", userHandler.GetWelcomeMessages)

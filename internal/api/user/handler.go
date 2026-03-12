@@ -16,6 +16,7 @@ import (
 
 	"github.com/peizhengma/biography-v2/internal/domain/conversation"
 	"github.com/peizhengma/biography-v2/internal/domain/memoir"
+	domainPreset "github.com/peizhengma/biography-v2/internal/domain/preset"
 	"github.com/peizhengma/biography-v2/internal/domain/topic"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
@@ -222,6 +223,136 @@ func getUserID(c *gin.Context) uuid.UUID {
 	}
 }
 
+func parseUUIDStrings(values []string) ([]uuid.UUID, error) {
+	ids := make([]uuid.UUID, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		id, err := uuid.Parse(value)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func topicCandidateToOption(candidate *topic.TopicCandidate) topic.TopicOption {
+	return topic.TopicOption{
+		ID:         candidate.ID,
+		Title:      candidate.Title,
+		Greeting:   derefTopicString(candidate.Greeting),
+		Context:    derefTopicString(candidate.Context),
+		EraContext: derefTopicString(candidate.EraContext),
+		Source:     string(candidate.Source),
+	}
+}
+
+func presetTopicToOption(candidate *domainPreset.Topic) topic.TopicOption {
+	return topic.TopicOption{
+		ID:       candidate.ID,
+		Title:    candidate.Topic,
+		Greeting: candidate.Greeting,
+		Context:  derefTopicString(candidate.ChatContext),
+		Source:   topic.OptionSourcePreset,
+	}
+}
+
+func derefTopicString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func (h *Handler) fillTopicOptionsWithPresets(ctx context.Context, options []topic.TopicOption, limit int, excludeSet map[uuid.UUID]struct{}) ([]topic.TopicOption, bool) {
+	if limit <= 0 || len(options) >= limit {
+		return options, false
+	}
+
+	presets, err := h.presetService.GetActiveTopics(ctx)
+	if err != nil || len(presets) == 0 {
+		return options, false
+	}
+
+	if excludeSet == nil {
+		excludeSet = make(map[uuid.UUID]struct{})
+	}
+
+	existingTitles := make(map[string]struct{}, len(options))
+	for _, option := range options {
+		excludeSet[option.ID] = struct{}{}
+		existingTitles[option.Title] = struct{}{}
+	}
+
+	hasMore := false
+	for _, presetTopic := range presets {
+		if _, exists := excludeSet[presetTopic.ID]; exists {
+			continue
+		}
+		if _, exists := existingTitles[presetTopic.Topic]; exists {
+			continue
+		}
+
+		if len(options) >= limit {
+			hasMore = true
+			break
+		}
+
+		options = append(options, presetTopicToOption(presetTopic))
+		excludeSet[presetTopic.ID] = struct{}{}
+		existingTitles[presetTopic.Topic] = struct{}{}
+	}
+
+	return options, hasMore
+}
+
+func (h *Handler) fillTopicOptionsWithManuals(ctx context.Context, userID uuid.UUID, options []topic.TopicOption, limit int, excludeSet map[uuid.UUID]struct{}) ([]topic.TopicOption, bool, error) {
+	if limit <= 0 || len(options) >= limit {
+		return options, false, nil
+	}
+
+	candidates, err := h.topicService.GetAvailableForUser(ctx, userID, 100)
+	if err != nil {
+		return options, false, err
+	}
+
+	if excludeSet == nil {
+		excludeSet = make(map[uuid.UUID]struct{})
+	}
+
+	existingTitles := make(map[string]struct{}, len(options))
+	for _, option := range options {
+		excludeSet[option.ID] = struct{}{}
+		existingTitles[option.Title] = struct{}{}
+	}
+
+	hasMore := false
+	for _, candidate := range candidates {
+		if candidate.Source != topic.SourceManual {
+			continue
+		}
+		if _, exists := excludeSet[candidate.ID]; exists {
+			continue
+		}
+		if _, exists := existingTitles[candidate.Title]; exists {
+			continue
+		}
+		if len(options) >= limit {
+			hasMore = true
+			break
+		}
+
+		options = append(options, topicCandidateToOption(candidate))
+		excludeSet[candidate.ID] = struct{}{}
+		existingTitles[candidate.Title] = struct{}{}
+	}
+
+	return options, hasMore, nil
+}
+
 // ============================================
 // 对话相关接口
 // ============================================
@@ -273,10 +404,26 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 		return
 	}
 
+	var selectedTopicID uuid.UUID
+	if strings.TrimSpace(input.TopicID) != "" {
+		parsedID, err := uuid.Parse(strings.TrimSpace(input.TopicID))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid topic id"})
+			return
+		}
+		selectedTopicID = parsedID
+	}
+
 	conv, err := h.convService.Create(c.Request.Context(), userID, &input)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if selectedTopicID != uuid.Nil && strings.TrimSpace(input.TopicSource) == string(topic.SourceAI) {
+		if err := h.topicService.MarkAsUsedForUser(c.Request.Context(), selectedTopicID, userID); err != nil {
+			log.Printf("[Topic] 标记话题已使用失败: topic_id=%s user_id=%s err=%v", selectedTopicID, userID, err)
+		}
 	}
 
 	c.JSON(http.StatusCreated, conv)
@@ -633,47 +780,85 @@ func (h *Handler) GetTopicOptions(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
 
 	// 先获取用户个性化话题
-	options, err := h.topicService.GetTopicOptions(c.Request.Context(), userID, limit)
+	candidates, err := h.topicService.GetAvailableForUser(c.Request.Context(), userID, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 如果用户话题不足，补充预设话题
-	if len(options) < limit {
-		presets, err := h.presetService.GetActiveTopics(c.Request.Context())
-		if err == nil && len(presets) > 0 {
-			// 记录已有话题标题，避免重复
-			existingTitles := make(map[string]bool)
-			for _, opt := range options {
-				existingTitles[opt.Title] = true
-			}
-
-			// 补充预设话题
-			for _, p := range presets {
-				if len(options) >= limit {
-					break
-				}
-				// 跳过重复标题
-				if existingTitles[p.Topic] {
-					continue
-				}
-				context := ""
-				if p.ChatContext != nil {
-					context = *p.ChatContext
-				}
-				options = append(options, topic.TopicOption{
-					ID:       p.ID,
-					Title:    p.Topic,
-					Greeting: p.Greeting,
-					Context:  context,
-				})
-			}
-		}
+	options := make([]topic.TopicOption, 0, limit)
+	for _, candidate := range candidates {
+		options = append(options, topicCandidateToOption(candidate))
 	}
+
+	options, _ = h.fillTopicOptionsWithPresets(c.Request.Context(), options, limit, nil)
 
 	c.JSON(http.StatusOK, gin.H{
 		"topics": options,
+	})
+}
+
+// NextTopicBatch 获取下一批话题
+func (h *Handler) NextTopicBatch(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	var input struct {
+		ExcludeTopicIDs []string `json:"exclude_topic_ids"`
+		BatchSize       int      `json:"batch_size"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	excludeIDs, err := parseUUIDStrings(input.ExcludeTopicIDs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid exclude_topic_ids"})
+		return
+	}
+
+	result, err := h.flowService.GetNextTopicBatch(c.Request.Context(), userID, excludeIDs, input.BatchSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	batchSize := input.BatchSize
+	if batchSize <= 0 {
+		batchSize = 3
+	}
+
+	options := make([]topic.TopicOption, 0, batchSize)
+	for _, candidate := range result.Topics {
+		options = append(options, topicCandidateToOption(candidate))
+	}
+
+	excludeSet := make(map[uuid.UUID]struct{}, len(excludeIDs)+len(options))
+	for _, id := range excludeIDs {
+		excludeSet[id] = struct{}{}
+	}
+	for _, option := range options {
+		excludeSet[option.ID] = struct{}{}
+	}
+
+	manualHasMore := false
+	options, manualHasMore, err = h.fillTopicOptionsWithManuals(c.Request.Context(), userID, options, batchSize, excludeSet)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	options, hasMorePresets := h.fillTopicOptionsWithPresets(c.Request.Context(), options, batchSize, excludeSet)
+
+	c.JSON(http.StatusOK, gin.H{
+		"topics":     options,
+		"generated":  result.Generated,
+		"has_more":   result.HasMore || manualHasMore || hasMorePresets,
+		"batch_size": batchSize,
 	})
 }
 

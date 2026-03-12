@@ -26,6 +26,13 @@ var (
 	ErrAlreadyCompleted     = errors.New("conversation already completed")
 )
 
+const (
+	defaultTopicBatchSize         = 3
+	defaultTopicPoolSize          = 9
+	defaultTopicGenerateBatchSize = 6
+	topicPoolScanLimit            = 100
+)
+
 // Service 对话流程服务，协调对话结束后的各项任务
 type Service struct {
 	userService   *userService.Service
@@ -58,6 +65,13 @@ type EndConversationResult struct {
 	Memoir       *memoir.Memoir             `json:"memoir,omitempty"`
 	Summary      string                     `json:"summary,omitempty"`
 	Message      string                     `json:"message"`
+}
+
+// TopicBatchResult 换一批话题结果
+type TopicBatchResult struct {
+	Topics    []*topic.TopicCandidate `json:"topics"`
+	Generated bool                    `json:"generated"`
+	HasMore   bool                    `json:"has_more"`
 }
 
 // EndConversation 结束对话（同步处理）
@@ -436,10 +450,10 @@ func (s *Service) handleTopicPool(ctx context.Context, u *user.User) {
 		return
 	}
 
-	existingTopics, _ := s.topicService.GetAvailableForUser(ctx, u.ID, 100)
+	existingTopics, _ := s.listAvailableAITopics(ctx, u.ID)
 	if len(existingTopics) == 0 {
 		log.Printf("[Flow] 用户已有回忆录但暂无个性化话题，生成首批话题")
-		s.generatePersonalizedTopics(ctx, u, 5)
+		s.generatePersonalizedTopics(ctx, u, defaultTopicPoolSize)
 	} else if len(existingTopics) < 4 {
 		log.Printf("[Flow] 用户已有 %d 篇回忆录，审查话题池", count)
 		s.reviewTopicPool(ctx, u)
@@ -447,13 +461,13 @@ func (s *Service) handleTopicPool(ctx context.Context, u *user.User) {
 }
 
 // generatePersonalizedTopics 生成个性化话题
-func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User, count int) {
+func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User, count int) int {
 	if count <= 0 {
-		count = 4
+		count = defaultTopicGenerateBatchSize
 	}
 
 	// 获取已有话题标题
-	existingTopics, _ := s.topicService.GetAvailableForUser(ctx, u.ID, 100)
+	existingTopics, _ := s.topicService.GetAvailableForUser(ctx, u.ID, topicPoolScanLimit)
 	var existingTitles []string
 	for _, t := range existingTopics {
 		existingTitles = append(existingTitles, t.Title)
@@ -474,9 +488,10 @@ func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User, 
 	})
 	if err != nil {
 		log.Printf("[Flow] 生成话题失败: %v", err)
-		return
+		return 0
 	}
 
+	createdCount := 0
 	// 创建话题
 	for _, t := range topics {
 		input := &topic.CreateTopicInput{
@@ -488,20 +503,23 @@ func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User, 
 		}
 		if _, err := s.topicService.Create(ctx, u.ID, input); err != nil {
 			log.Printf("[Flow] 创建话题失败: %v", err)
+			continue
 		}
+		createdCount++
 	}
 
-	log.Printf("[Flow] 已生成 %d 个个性化话题", len(topics))
+	log.Printf("[Flow] 已生成 %d 个个性化话题", createdCount)
+	return createdCount
 }
 
 // reviewTopicPool 审查话题池
 func (s *Service) reviewTopicPool(ctx context.Context, u *user.User) {
 	// 获取可用话题
-	existingTopics, _ := s.topicService.GetAvailableForUser(ctx, u.ID, 100)
+	existingTopics, _ := s.listAvailableAITopics(ctx, u.ID)
 
-	// 如果话题数量少于 4，补充到 5 个左右
+	// 如果话题数量少于 4，补充到 9 个左右
 	if len(existingTopics) < 4 {
-		needed := 5 - len(existingTopics)
+		needed := defaultTopicPoolSize - len(existingTopics)
 		if needed < 1 {
 			needed = 1
 		}
@@ -526,7 +544,7 @@ func (s *Service) RegenerateTopicPoolForUser(ctx context.Context, userID uuid.UU
 	}
 
 	if count <= 0 {
-		count = 5
+		count = defaultTopicPoolSize
 	}
 
 	if err := s.topicService.DeleteByUserAndSource(ctx, userID, topic.SourceAI); err != nil {
@@ -535,6 +553,57 @@ func (s *Service) RegenerateTopicPoolForUser(ctx context.Context, userID uuid.UU
 
 	s.generatePersonalizedTopics(ctx, u, count)
 	return nil
+}
+
+// GetNextTopicBatch 获取下一批个性化话题，不足时按需补池
+func (s *Service) GetNextTopicBatch(ctx context.Context, userID uuid.UUID, excludeIDs []uuid.UUID, batchSize int) (*TopicBatchResult, error) {
+	if batchSize <= 0 {
+		batchSize = defaultTopicBatchSize
+	}
+
+	excludeSet := make(map[uuid.UUID]struct{}, len(excludeIDs))
+	for _, id := range excludeIDs {
+		excludeSet[id] = struct{}{}
+	}
+
+	availableTopics, err := s.listAvailableAITopics(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	unseenTopics := filterTopicCandidatesExcludingIDs(availableTopics, excludeSet)
+	generated := false
+	if len(unseenTopics) < batchSize {
+		canGenerate, err := s.canGeneratePersonalizedTopics(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if canGenerate {
+			u, err := s.userService.GetByID(ctx, userID)
+			if err != nil {
+				return nil, err
+			}
+			generatedCount := s.generatePersonalizedTopics(ctx, u, defaultTopicGenerateBatchSize)
+			generated = generatedCount > 0
+			if generated {
+				if err := s.trimAITopicPool(ctx, userID, defaultTopicPoolSize); err != nil {
+					return nil, err
+				}
+				availableTopics, err = s.listAvailableAITopics(ctx, userID)
+				if err != nil {
+					return nil, err
+				}
+				unseenTopics = filterTopicCandidatesExcludingIDs(availableTopics, excludeSet)
+			}
+		}
+	}
+
+	batchTopics := limitTopicCandidates(unseenTopics, batchSize)
+	return &TopicBatchResult{
+		Topics:    batchTopics,
+		Generated: generated,
+		HasMore:   len(unseenTopics) > len(batchTopics),
+	}, nil
 }
 
 func (s *Service) updateStoryMemory(ctx context.Context, u *user.User, conversationText string) {
@@ -687,4 +756,83 @@ func (s *Service) createFallbackMemoir(ctx context.Context, userID, conversation
 
 	log.Printf("[Flow] 已回退创建原始对话记录: %s", m.Title)
 	return m
+}
+
+func (s *Service) canGeneratePersonalizedTopics(ctx context.Context, userID uuid.UUID) (bool, error) {
+	count, err := s.memoirService.Count(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *Service) listAvailableAITopics(ctx context.Context, userID uuid.UUID) ([]*topic.TopicCandidate, error) {
+	topics, err := s.topicService.GetAvailableForUser(ctx, userID, topicPoolScanLimit)
+	if err != nil {
+		return nil, err
+	}
+	return filterTopicCandidatesBySource(topics, topic.SourceAI), nil
+}
+
+func (s *Service) trimAITopicPool(ctx context.Context, userID uuid.UUID, maxCount int) error {
+	if maxCount <= 0 {
+		return nil
+	}
+
+	availableTopics, err := s.listAvailableAITopics(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	for _, id := range topicCandidatesToTrim(availableTopics, maxCount) {
+		if err := s.topicService.Delete(ctx, id, userID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func filterTopicCandidatesBySource(topics []*topic.TopicCandidate, source topic.Source) []*topic.TopicCandidate {
+	filtered := make([]*topic.TopicCandidate, 0, len(topics))
+	for _, t := range topics {
+		if t.Source == source {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
+func filterTopicCandidatesExcludingIDs(topics []*topic.TopicCandidate, excludeSet map[uuid.UUID]struct{}) []*topic.TopicCandidate {
+	if len(excludeSet) == 0 {
+		return append([]*topic.TopicCandidate(nil), topics...)
+	}
+
+	filtered := make([]*topic.TopicCandidate, 0, len(topics))
+	for _, t := range topics {
+		if _, exists := excludeSet[t.ID]; exists {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
+}
+
+func limitTopicCandidates(topics []*topic.TopicCandidate, limit int) []*topic.TopicCandidate {
+	if limit <= 0 || len(topics) <= limit {
+		return append([]*topic.TopicCandidate(nil), topics...)
+	}
+	return append([]*topic.TopicCandidate(nil), topics[:limit]...)
+}
+
+func topicCandidatesToTrim(topics []*topic.TopicCandidate, maxCount int) []uuid.UUID {
+	if maxCount <= 0 || len(topics) <= maxCount {
+		return nil
+	}
+
+	trimmed := make([]uuid.UUID, 0, len(topics)-maxCount)
+	for _, t := range topics[maxCount:] {
+		trimmed = append(trimmed, t.ID)
+	}
+	return trimmed
 }
