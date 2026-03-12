@@ -32,6 +32,7 @@ const (
 
 const greetingAudioCacheMaxEntries = 128
 const realtimeTTSSampleRate = 16000
+const realtimeLLMHedgeAfter = 9 * time.Second
 
 var (
 	greetingAudioCacheMu sync.RWMutex
@@ -491,8 +492,22 @@ func (s *Session) finishUserTurn() error {
 		formatTurnContextForLog(packet.CurrentUserTurn),
 	)
 
-	// 模型通过 JSON 协议返回文本或结束指令
-	resp, usedProvider, err := s.llmManager.ChatWithRetry(s.ctx, inferenceMessages, 3)
+	// 实时链路优先压缩长尾；Gemini 主模型超过 9 秒时启动对冲请求。
+	var (
+		resp         *llm.Response
+		usedProvider string
+	)
+	if provider.Name() == "gemini" {
+		resp, usedProvider, err = s.llmManager.HedgedChat(s.ctx, inferenceMessages, llm.HedgedChatConfig{
+			HedgeAfter: realtimeLLMHedgeAfter,
+			HedgeProviders: []string{
+				llm.ProviderGeminiRealtimePreview,
+				llm.ProviderGeminiRealtimeFast,
+			},
+		})
+	} else {
+		resp, usedProvider, err = s.llmManager.ChatWithRetry(s.ctx, inferenceMessages, 3)
+	}
 	if err != nil {
 		s.setState(StateListening, "LLM 调用失败")
 		turnState.outcome = turntrace.OutcomeLLMError

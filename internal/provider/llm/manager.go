@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Manager LLM 提供者管理器
@@ -13,6 +15,11 @@ type Manager struct {
 	providers map[string]Provider
 	primary   string
 	mu        sync.RWMutex
+}
+
+type HedgedChatConfig struct {
+	HedgeAfter     time.Duration
+	HedgeProviders []string
 }
 
 // NewManager 创建管理器
@@ -94,6 +101,121 @@ func (m *Manager) ChatWithRetry(ctx context.Context, messages []Message, attempt
 	return nil, provider.Name(), lastErr
 }
 
+func (m *Manager) HedgedChat(ctx context.Context, messages []Message, cfg HedgedChatConfig) (*Response, string, error) {
+	primary, err := m.Primary()
+	if err != nil {
+		return nil, "", err
+	}
+
+	if cfg.HedgeAfter <= 0 {
+		cfg.HedgeAfter = 9 * time.Second
+	}
+
+	hedgeProviders := m.resolveProviders(cfg.HedgeProviders, primary.Name())
+	if len(hedgeProviders) == 0 {
+		resp, err := primary.Chat(ctx, messages)
+		if err != nil {
+			return nil, primary.Name(), err
+		}
+		return resp, primary.Name(), nil
+	}
+
+	type result struct {
+		provider string
+		resp     *Response
+		err      error
+		elapsed  time.Duration
+	}
+
+	startedAt := time.Now()
+	runCtx, cancelAll := context.WithCancel(ctx)
+	defer cancelAll()
+
+	results := make(chan result, 1+len(hedgeProviders))
+	cancelMu := sync.Mutex{}
+	cancelFns := make([]context.CancelFunc, 0, 1+len(hedgeProviders))
+	launchMu := sync.Mutex{}
+	totalLaunched := 0
+	hedgesLaunched := false
+
+	launchProvider := func(provider Provider) {
+		reqCtx, cancel := context.WithCancel(runCtx)
+		cancelMu.Lock()
+		cancelFns = append(cancelFns, cancel)
+		cancelMu.Unlock()
+
+		go func() {
+			callStartedAt := time.Now()
+			resp, err := provider.Chat(reqCtx, messages)
+			results <- result{
+				provider: provider.Name(),
+				resp:     resp,
+				err:      err,
+				elapsed:  time.Since(callStartedAt),
+			}
+		}()
+	}
+
+	launchHedges := func(reason string) {
+		launchMu.Lock()
+		defer launchMu.Unlock()
+		if hedgesLaunched {
+			return
+		}
+		hedgesLaunched = true
+		totalLaunched += len(hedgeProviders)
+		log.Printf("[LLM] hedged chat launching %d hedge request(s): primary=%s reason=%s after=%s", len(hedgeProviders), primary.Name(), reason, time.Since(startedAt).Round(time.Millisecond))
+		for _, provider := range hedgeProviders {
+			launchProvider(provider)
+		}
+	}
+
+	totalLaunched = 1
+	launchProvider(primary)
+	timer := time.NewTimer(cfg.HedgeAfter)
+	defer timer.Stop()
+
+	var errorMessages []string
+	completed := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			cancelMu.Lock()
+			for _, cancel := range cancelFns {
+				cancel()
+			}
+			cancelMu.Unlock()
+			return nil, "", ctx.Err()
+		case <-timer.C:
+			launchHedges("slow_primary")
+		case res := <-results:
+			completed++
+			if res.err == nil && res.resp != nil {
+				cancelMu.Lock()
+				for _, cancel := range cancelFns {
+					cancel()
+				}
+				cancelMu.Unlock()
+				log.Printf("[LLM] hedged chat winner=%s total_elapsed=%s call_elapsed=%s", res.provider, time.Since(startedAt).Round(time.Millisecond), res.elapsed.Round(time.Millisecond))
+				return res.resp, res.provider, nil
+			}
+
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %v", res.provider, res.err))
+			if res.provider == primary.Name() {
+				launchHedges("primary_error")
+			}
+
+			launchMu.Lock()
+			done := completed >= totalLaunched
+			launchMu.Unlock()
+			if done {
+				return nil, primary.Name(), fmt.Errorf("llm hedged chat failed after %s: %s", time.Since(startedAt).Round(time.Millisecond), strings.Join(errorMessages, "; "))
+			}
+		}
+	}
+}
+
 // ChatStream 使用主要提供者进行流式对话
 func (m *Manager) ChatStream(ctx context.Context, messages []Message) (<-chan Chunk, error) {
 	provider, err := m.Primary()
@@ -160,6 +282,29 @@ func (m *Manager) Available() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (m *Manager) resolveProviders(names []string, exclude string) []Provider {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	providers := make([]Provider, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name == "" || name == exclude {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		provider, ok := m.providers[name]
+		if !ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		providers = append(providers, provider)
+	}
+	return providers
 }
 
 // ChatWithFallback 带降级的对话，主提供者失败时尝试其他提供者

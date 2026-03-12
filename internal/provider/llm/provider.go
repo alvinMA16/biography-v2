@@ -4,7 +4,7 @@ import "context"
 
 // Message 对话消息
 type Message struct {
-	Role    string `json:"role"`    // system, user, assistant
+	Role    string `json:"role"` // system, user, assistant
 	Content string `json:"content"`
 }
 
@@ -62,6 +62,30 @@ type Provider interface {
 
 	// HealthCheck 健康检查
 	HealthCheck(ctx context.Context) error
+}
+
+const (
+	ProviderGeminiRealtimePreview = "gemini-realtime-preview"
+	ProviderGeminiRealtimeFast    = "gemini-realtime-fast"
+)
+
+type aliasedProvider struct {
+	Provider
+	name string
+}
+
+func (p *aliasedProvider) Name() string {
+	return p.name
+}
+
+func WithAlias(name string, provider Provider) Provider {
+	if provider == nil || name == "" {
+		return provider
+	}
+	return &aliasedProvider{
+		Provider: provider,
+		name:     name,
+	}
 }
 
 // ProviderConfig 提供者配置

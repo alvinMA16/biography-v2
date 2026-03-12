@@ -182,6 +182,38 @@ func initLLMProviders(cfg *config.Config) *llm.Manager {
 			manager.Register(geminiProvider)
 			log.Printf("Gemini provider initialized (model: %s)", cfg.GeminiModel)
 		}
+
+		if cfg.GeminiRealtimeHedgeModel1 != "" {
+			hedgeProvider, err := gemini.New(llm.ProviderConfig{
+				APIKey:    cfg.GeminiAPIKey,
+				Model:     cfg.GeminiRealtimeHedgeModel1,
+				ModelFast: cfg.GeminiModelFast,
+				Proxy:     cfg.GeminiProxy,
+				Timeout:   60,
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to initialize Gemini realtime hedge provider 1: %v", err)
+			} else {
+				manager.Register(llm.WithAlias(llm.ProviderGeminiRealtimePreview, hedgeProvider))
+				log.Printf("Gemini realtime hedge provider initialized (name: %s model: %s)", llm.ProviderGeminiRealtimePreview, cfg.GeminiRealtimeHedgeModel1)
+			}
+		}
+
+		if cfg.GeminiRealtimeHedgeModel2 != "" {
+			hedgeProvider, err := gemini.New(llm.ProviderConfig{
+				APIKey:    cfg.GeminiAPIKey,
+				Model:     cfg.GeminiRealtimeHedgeModel2,
+				ModelFast: cfg.GeminiModelFast,
+				Proxy:     cfg.GeminiProxy,
+				Timeout:   60,
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to initialize Gemini realtime hedge provider 2: %v", err)
+			} else {
+				manager.Register(llm.WithAlias(llm.ProviderGeminiRealtimeFast, hedgeProvider))
+				log.Printf("Gemini realtime hedge provider initialized (name: %s model: %s)", llm.ProviderGeminiRealtimeFast, cfg.GeminiRealtimeHedgeModel2)
+			}
+		}
 	}
 
 	// 初始化 DashScope
