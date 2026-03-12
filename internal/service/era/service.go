@@ -126,6 +126,24 @@ func (s *Service) ListWithYear(ctx context.Context, category *string, year *int,
 	return s.repo.List(ctx, filter)
 }
 
+// ListByYearRange 获取与年份范围有交集的时代记忆
+func (s *Service) ListByYearRange(ctx context.Context, startYear, endYear, limit int) ([]*era.MemoryPreset, error) {
+	if endYear < startYear {
+		startYear, endYear = endYear, startYear
+	}
+	filter := era.ListMemoryPresetsFilter{
+		YearStart: &startYear,
+		YearEnd:   &endYear,
+		Limit:     limit,
+		Offset:    0,
+	}
+	memories, _, err := s.repo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return memories, nil
+}
+
 // GetByBirthYear 根据出生年份获取相关时代记忆
 func (s *Service) GetByBirthYear(ctx context.Context, birthYear int) ([]*era.MemoryPreset, error) {
 	return s.repo.GetByYearRange(ctx, birthYear)

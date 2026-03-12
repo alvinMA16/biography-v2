@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"text/template"
@@ -205,6 +206,26 @@ type GenerateTopicsInput struct {
 	Count           int
 }
 
+// TopicEraMemoryCandidate 候选时代记忆
+type TopicEraMemoryCandidate struct {
+	StartYear int
+	EndYear   int
+	Category  string
+	Content   string
+}
+
+// GenerateTopicEraContextsInput 批量补充话题时代背景输入
+type GenerateTopicEraContextsInput struct {
+	BirthYear     *int
+	Topics        []topic.GeneratedTopic
+	EraCandidates []TopicEraMemoryCandidate
+}
+
+type topicEraContextOutput struct {
+	Index      int    `json:"index"`
+	EraContext string `json:"era_context"`
+}
+
 // GenerateTopics 生成话题
 func (s *Service) GenerateTopics(ctx context.Context, input *GenerateTopicsInput) ([]topic.GeneratedTopic, error) {
 	if _, err := s.manager.Primary(); err != nil {
@@ -263,7 +284,59 @@ func (s *Service) GenerateTopics(ctx context.Context, input *GenerateTopicsInput
 		return nil, err
 	}
 
+	topics = normalizeGeneratedTopics(topics)
+	if len(topics) == 0 {
+		return nil, ErrInvalidResponse
+	}
+
 	return topics, nil
+}
+
+// GenerateTopicEraContexts 批量补充话题时代背景
+func (s *Service) GenerateTopicEraContexts(ctx context.Context, input *GenerateTopicEraContextsInput) ([]string, error) {
+	if len(input.Topics) == 0 || len(input.EraCandidates) == 0 {
+		return nil, nil
+	}
+	if _, err := s.manager.Primary(); err != nil {
+		return nil, ErrLLMNotAvailable
+	}
+
+	birthYear := 0
+	if input.BirthYear != nil {
+		birthYear = *input.BirthYear
+	}
+
+	promptText, err := renderTemplate(prompt.TopicEraEnrichmentPrompt, map[string]interface{}{
+		"BirthYear":     birthYear,
+		"Topics":        formatTopicsForEraEnrichment(input.Topics),
+		"EraCandidates": formatEraCandidatesForPrompt(input.EraCandidates),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, providerName, err := s.manager.ChatWithRetry(ctx, []llm.Message{
+		{Role: "user", Content: promptText},
+	}, 2)
+	if err != nil {
+		return nil, err
+	}
+
+	var outputs []topicEraContextOutput
+	if err := parseJSONResponse(resp.Content, &outputs); err != nil {
+		log.Printf("[LLM] GenerateTopicEraContexts invalid response (provider=%s): %s", providerName, truncateForLog(resp.Content, 1000))
+		return nil, err
+	}
+
+	result := make([]string, len(input.Topics))
+	for _, output := range outputs {
+		if output.Index < 0 || output.Index >= len(result) {
+			continue
+		}
+		result[output.Index] = strings.TrimSpace(output.EraContext)
+	}
+
+	return result, nil
 }
 
 // GenerateStoryMemoryInput 生成用户长期记忆输入
@@ -478,6 +551,64 @@ func parseJSONResponse(content string, v interface{}) error {
 	}
 
 	return nil
+}
+
+func normalizeGeneratedTopics(topics []topic.GeneratedTopic) []topic.GeneratedTopic {
+	normalized := make([]topic.GeneratedTopic, 0, len(topics))
+	for _, item := range topics {
+		item.Title = strings.TrimSpace(item.Title)
+		item.Greeting = strings.TrimSpace(item.Greeting)
+		item.Context = normalizeTopicContext(item.Context)
+		item.EraContext = strings.TrimSpace(item.EraContext)
+		if item.Title == "" || item.Greeting == "" || item.Context == "" {
+			continue
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func normalizeTopicContext(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	normalized := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		normalized = append(normalized, line)
+	}
+	return strings.Join(normalized, "\n")
+}
+
+func formatTopicsForEraEnrichment(topics []topic.GeneratedTopic) string {
+	var sb strings.Builder
+	for idx, item := range topics {
+		sb.WriteString(fmt.Sprintf("%d. 标题：%s\n", idx, strings.TrimSpace(item.Title)))
+		if greeting := strings.TrimSpace(item.Greeting); greeting != "" {
+			sb.WriteString("开场白：")
+			sb.WriteString(greeting)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("上下文：\n")
+		sb.WriteString(normalizeTopicContext(item.Context))
+		sb.WriteString("\n\n")
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func formatEraCandidatesForPrompt(candidates []TopicEraMemoryCandidate) string {
+	var sb strings.Builder
+	for idx, item := range candidates {
+		category := strings.TrimSpace(item.Category)
+		if category == "" {
+			category = "未分类"
+		}
+		sb.WriteString(fmt.Sprintf("%d. %d-%d｜%s｜%s\n", idx+1, item.StartYear, item.EndYear, category, strings.TrimSpace(item.Content)))
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 func truncateForLog(s string, maxLen int) string {

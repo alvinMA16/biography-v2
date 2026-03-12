@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/peizhengma/biography-v2/internal/domain/topic"
 	"github.com/peizhengma/biography-v2/internal/domain/user"
 	convService "github.com/peizhengma/biography-v2/internal/service/conversation"
+	eraService "github.com/peizhengma/biography-v2/internal/service/era"
 	llmService "github.com/peizhengma/biography-v2/internal/service/llm"
 	memoirService "github.com/peizhengma/biography-v2/internal/service/memoir"
 	topicService "github.com/peizhengma/biography-v2/internal/service/topic"
@@ -31,7 +34,10 @@ const (
 	defaultTopicPoolSize          = 9
 	defaultTopicGenerateBatchSize = 6
 	topicPoolScanLimit            = 100
+	topicEraCandidateLimit        = 24
 )
+
+var topicContextYearRangePattern = regexp.MustCompile(`关联时期[：:][^\n]*?((?:19|20)\d{2})\s*[-~至]\s*((?:19|20)\d{2})`)
 
 // Service 对话流程服务，协调对话结束后的各项任务
 type Service struct {
@@ -40,6 +46,7 @@ type Service struct {
 	memoirService *memoirService.Service
 	topicService  *topicService.Service
 	llmService    *llmService.Service
+	eraService    *eraService.Service
 }
 
 // New 创建流程服务
@@ -49,6 +56,7 @@ func New(
 	memoirSvc *memoirService.Service,
 	topicSvc *topicService.Service,
 	llmSvc *llmService.Service,
+	eraSvc *eraService.Service,
 ) *Service {
 	return &Service{
 		userService:   userSvc,
@@ -56,6 +64,7 @@ func New(
 		memoirService: memoirSvc,
 		topicService:  topicSvc,
 		llmService:    llmSvc,
+		eraService:    eraSvc,
 	}
 }
 
@@ -491,6 +500,8 @@ func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User, 
 		return 0
 	}
 
+	topics = s.enrichTopicsWithEraContext(ctx, u.BirthYear, topics)
+
 	createdCount := 0
 	// 创建话题
 	for _, t := range topics {
@@ -510,6 +521,99 @@ func (s *Service) generatePersonalizedTopics(ctx context.Context, u *user.User, 
 
 	log.Printf("[Flow] 已生成 %d 个个性化话题", createdCount)
 	return createdCount
+}
+
+func (s *Service) enrichTopicsWithEraContext(ctx context.Context, birthYear *int, topics []topic.GeneratedTopic) []topic.GeneratedTopic {
+	if s.eraService == nil || len(topics) == 0 {
+		return topics
+	}
+
+	startYear, endYear, ok := topicBatchYearWindow(topics)
+	if !ok {
+		return topics
+	}
+
+	memories, err := s.eraService.ListByYearRange(ctx, startYear, endYear, topicEraCandidateLimit)
+	if err != nil {
+		log.Printf("[Flow] 获取时代记忆候选失败: %v", err)
+		return topics
+	}
+	if len(memories) == 0 {
+		return topics
+	}
+
+	candidates := make([]llmService.TopicEraMemoryCandidate, 0, len(memories))
+	for _, item := range memories {
+		candidates = append(candidates, llmService.TopicEraMemoryCandidate{
+			StartYear: item.StartYear,
+			EndYear:   item.EndYear,
+			Category:  derefString(item.Category),
+			Content:   item.Content,
+		})
+	}
+
+	eraContexts, err := s.llmService.GenerateTopicEraContexts(ctx, &llmService.GenerateTopicEraContextsInput{
+		BirthYear:     birthYear,
+		Topics:        topics,
+		EraCandidates: candidates,
+	})
+	if err != nil {
+		log.Printf("[Flow] 批量补充话题时代背景失败: %v", err)
+		return topics
+	}
+
+	for idx := range topics {
+		if idx >= len(eraContexts) {
+			break
+		}
+		topics[idx].EraContext = strings.TrimSpace(eraContexts[idx])
+	}
+
+	return topics
+}
+
+func topicBatchYearWindow(topics []topic.GeneratedTopic) (int, int, bool) {
+	var (
+		minYear int
+		maxYear int
+		found   bool
+	)
+
+	for _, item := range topics {
+		startYear, endYear, ok := extractTopicYearRange(item.Context)
+		if !ok {
+			continue
+		}
+		if !found || startYear < minYear {
+			minYear = startYear
+		}
+		if !found || endYear > maxYear {
+			maxYear = endYear
+		}
+		found = true
+	}
+
+	return minYear, maxYear, found
+}
+
+func extractTopicYearRange(context string) (int, int, bool) {
+	matches := topicContextYearRangePattern.FindStringSubmatch(context)
+	if len(matches) != 3 {
+		return 0, 0, false
+	}
+
+	startYear, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, 0, false
+	}
+	endYear, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return 0, 0, false
+	}
+	if endYear < startYear {
+		startYear, endYear = endYear, startYear
+	}
+	return startYear, endYear, true
 }
 
 // reviewTopicPool 审查话题池

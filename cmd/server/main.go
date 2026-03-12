@@ -100,7 +100,7 @@ func main() {
 	llmSvc := llmService.New(llmManager)
 
 	// 初始化 Flow Service
-	flowSvc := flowService.New(userSvc, convSvc, memoirSvc, topicSvc, llmSvc)
+	flowSvc := flowService.New(userSvc, convSvc, memoirSvc, topicSvc, llmSvc, eraSvc)
 
 	// 初始化路由
 	router := api.NewRouter(&api.RouterDeps{

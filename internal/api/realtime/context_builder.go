@@ -16,7 +16,6 @@ const (
 	longTurnSummarySentenceLimit    = 2
 	longTurnFactsLimit              = 5
 	longTurnFollowupCandidatesLimit = 3
-	defaultTopicContextMaxRunes     = 120
 	longTurnFocusMaxRunes           = 120
 	longTurnSummaryMaxRunes         = 90
 	longTurnFactMaxRunes            = 40
@@ -77,7 +76,7 @@ func buildChatContextPacket(config *SessionConfig, messages []llm.Message) ChatC
 	packet := ChatContextPacket{
 		Topic: TopicContext{
 			Title:   strings.TrimSpace(config.TopicTitle),
-			Context: truncateRunes(strings.TrimSpace(config.TopicContext), defaultTopicContextMaxRunes),
+			Context: strings.TrimSpace(config.TopicContext),
 		},
 		CoreProfile: CoreProfile{
 			UserName:  strings.TrimSpace(config.UserName),
