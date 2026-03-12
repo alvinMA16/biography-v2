@@ -1556,16 +1556,48 @@ function renderTopicPool(topics) {
 
     container.innerHTML = `<div class="admin-topic-list">
         ${topics.map(t => {
+            const source = getTopicSourceMeta(t.source);
+            const blocks = [
+                renderTopicBlock('开场白', t.greeting, '这条话题没有单独配置开场白'),
+                renderTopicBlock('对话上下文', t.context, '这条话题没有补充上下文'),
+                renderTopicBlock('时代背景', t.era_context, '这条话题没有补充时代背景'),
+            ].filter(Boolean).join('');
+
             return `
                 <div class="admin-topic-item">
                     <div class="admin-topic-item-header">
                         <div class="admin-topic-title">${escapeHtml(t.title)}</div>
+                        <div class="admin-topic-meta">
+                            <span class="admin-topic-source ${source.className}">${escapeHtml(source.label)}</span>
+                        </div>
                     </div>
-                    <div class="admin-topic-greeting">${escapeHtml(t.greeting || '')}</div>
+                    <div class="admin-topic-blocks">${blocks}</div>
                 </div>
             `;
         }).join('')}
     </div>`;
+}
+
+function renderTopicBlock(label, value, emptyText) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    const isEmpty = !text;
+    return `
+        <div class="admin-topic-block">
+            <div class="admin-topic-block-label">${escapeHtml(label)}</div>
+            <div class="admin-topic-block-text ${isEmpty ? 'is-empty' : ''}">${escapeHtml(isEmpty ? emptyText : text)}</div>
+        </div>
+    `;
+}
+
+function getTopicSourceMeta(source) {
+    switch ((source || '').toLowerCase()) {
+        case 'ai':
+            return { label: 'AI 生成', className: 'source-ai' };
+        case 'manual':
+            return { label: '人工创建', className: 'source-manual' };
+        default:
+            return { label: '来源未知', className: 'source-unknown' };
+    }
 }
 
 async function regenerateTopicPool() {
