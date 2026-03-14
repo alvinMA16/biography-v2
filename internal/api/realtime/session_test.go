@@ -1,6 +1,9 @@
 package realtime
 
-import "testing"
+import (
+	"encoding/base64"
+	"testing"
+)
 
 func TestEnsureFirstSessionClosingText(t *testing.T) {
 	text := ensureFirstSessionClosingText("", true)
@@ -36,5 +39,48 @@ func TestDecodeAssistantEnvelopeCodeFence(t *testing.T) {
 	}
 	if text == "" {
 		t.Fatal("expected fenced JSON to parse")
+	}
+}
+
+func TestHandleAudioIgnoredOutsideListening(t *testing.T) {
+	session := &Session{}
+
+	if err := session.handleAudio(base64.StdEncoding.EncodeToString([]byte{0x00, 0x01})); err != nil {
+		t.Fatalf("expected audio outside listening to be ignored, got error: %v", err)
+	}
+	if session.currentTurnASRBuffer != nil {
+		t.Fatal("expected no ASR turn buffer to be created outside listening")
+	}
+}
+
+func TestTurnASRBufferIsolationAcrossTurns(t *testing.T) {
+	session := &Session{}
+	session.setState(StateListening, "test")
+
+	firstTurn := session.ensureCurrentTurnASRBuffer()
+	firstTurn.appendResult("第一轮内容。", true)
+
+	finalizing := session.beginTurnASRFinalization()
+	if finalizing != firstTurn {
+		t.Fatal("expected finalizing buffer to be the first turn buffer")
+	}
+
+	secondTurn := session.ensureCurrentTurnASRBuffer()
+	if secondTurn == firstTurn {
+		t.Fatal("expected a new buffer for the next turn")
+	}
+	secondTurn.appendResult("第二轮内容。", true)
+
+	firstText, source, _ := session.collectUserTextWithGrace(finalizing)
+	if source != "final" {
+		t.Fatalf("expected final source, got %s", source)
+	}
+	if firstText != "第一轮内容。" {
+		t.Fatalf("expected first turn text only, got %q", firstText)
+	}
+
+	secondText, _, _ := secondTurn.consume()
+	if secondText != "第二轮内容。" {
+		t.Fatalf("expected second turn text only, got %q", secondText)
 	}
 }

@@ -45,6 +45,7 @@ type Session struct {
 	conn    *websocket.Conn
 	config  *SessionConfig
 	state   SessionState
+	stateMu sync.RWMutex
 	writeMu sync.Mutex
 
 	// 依赖
@@ -59,11 +60,10 @@ type Session struct {
 	livePersistEnabled    bool
 	mu                    sync.RWMutex
 
-	// 当前用户输入缓冲（由 ASR 消费协程写入）
-	currentUserText strings.Builder
-	currentASRText  string
-	lastASRFinalAt  *time.Time
-	asrTextMu       sync.Mutex
+	// 当前轮次的 ASR 文本缓冲，按 turn 隔离，避免旧流结果串入新轮。
+	currentTurnASRBuffer    *asrTurnBuffer
+	finalizingTurnASRBuffer *asrTurnBuffer
+	asrTextMu               sync.RWMutex
 
 	// ASR 流（一个会话内复用）
 	asrAudioChan    chan []byte
@@ -79,6 +79,73 @@ type Session struct {
 	turnIndex             int
 	turnDiagnosticPersist func(input *turntrace.CreateInput) error
 	audioReceivingSent    bool
+}
+
+type asrTurnBuffer struct {
+	mu          sync.Mutex
+	finalText   strings.Builder
+	interimText string
+	lastFinalAt *time.Time
+}
+
+func (b *asrTurnBuffer) appendResult(text string, isFinal bool) {
+	if b == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if isFinal {
+		b.finalText.WriteString(text)
+		now := time.Now()
+		b.lastFinalAt = &now
+		b.interimText = ""
+		return
+	}
+
+	b.interimText = text
+}
+
+func (b *asrTurnBuffer) snapshot() (string, string, *time.Time) {
+	if b == nil {
+		return "", "", nil
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	finalText := strings.TrimSpace(b.finalText.String())
+	interimText := strings.TrimSpace(b.interimText)
+	var lastFinalAt *time.Time
+	if b.lastFinalAt != nil {
+		t := *b.lastFinalAt
+		lastFinalAt = &t
+	}
+	return finalText, interimText, lastFinalAt
+}
+
+func (b *asrTurnBuffer) consume() (string, string, *time.Time) {
+	if b == nil {
+		return "", "", nil
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	finalText := strings.TrimSpace(b.finalText.String())
+	interimText := strings.TrimSpace(b.interimText)
+	var lastFinalAt *time.Time
+	if b.lastFinalAt != nil {
+		t := *b.lastFinalAt
+		lastFinalAt = &t
+	}
+
+	b.finalText.Reset()
+	b.interimText = ""
+	b.lastFinalAt = nil
+
+	return finalText, interimText, lastFinalAt
 }
 
 // NewSession 创建新会话
@@ -114,7 +181,7 @@ func (s *Session) Run() error {
 	defer s.closeASRStream()
 	defer s.sendTurnStatus(0, TurnStateSessionEnded, "", "")
 	defer func() {
-		log.Printf("[Session] 会话结束: chunks=%d, bytes=%d, state=%d", s.audioChunks, s.audioBytes, s.state)
+		log.Printf("[Session] 会话结束: chunks=%d, bytes=%d, state=%d", s.audioChunks, s.audioBytes, s.getState())
 	}()
 	log.Printf("[Session] 会话启动: conversation_id=%s mode=%s speaker=%s", s.config.ConversationID, s.config.Mode, s.config.Speaker)
 
@@ -155,6 +222,10 @@ func (s *Session) Run() error {
 			}
 
 		case MsgTypeStop:
+			if s.getState() != StateListening {
+				log.Printf("[Session] 忽略 stop: current_state=%s", sessionStateString(s.getState()))
+				continue
+			}
 			log.Printf("[Session] 收到 stop: 准备结束用户本轮输入")
 			// 用户停止说话，生成回复
 			if err := s.finishUserTurn(); err != nil {
@@ -188,6 +259,7 @@ func (s *Session) ensureASRStream() error {
 	log.Printf("[Session] ASR 流已建立: format=pcm sample_rate=16000")
 
 	s.asrAudioChan = audioChan
+	turnBuffer := s.ensureCurrentTurnASRBuffer()
 
 	go func() {
 		log.Printf("[Session] ASR 结果协程启动")
@@ -203,25 +275,16 @@ func (s *Session) ensureASRStream() error {
 		}(audioChan)
 
 		for result := range resultChan {
-			// 发送 ASR 结果给前端（中间+最终）
-			s.sendASR(result.Text, result.IsFinal)
 			if strings.TrimSpace(result.Text) != "" {
 				log.Printf("[Session] ASR 结果: final=%v len=%d text=%q", result.IsFinal, len(result.Text), truncateForLog(result.Text, 80))
 			}
 
-			s.asrTextMu.Lock()
-			if result.IsFinal {
-				if result.Text != "" {
-					s.currentUserText.WriteString(result.Text)
-					now := time.Now()
-					s.lastASRFinalAt = &now
-				}
-				s.currentASRText = ""
-			} else if result.Text != "" {
-				// 保留最新中间结果，stop 触发时可兜底使用
-				s.currentASRText = result.Text
+			turnBuffer.appendResult(result.Text, result.IsFinal)
+
+			// 只把当前 listening turn 的识别结果回显给前端，避免旧流结果污染新轮展示。
+			if s.shouldForwardASRResult(turnBuffer) {
+				s.sendASR(result.Text, result.IsFinal)
 			}
-			s.asrTextMu.Unlock()
 		}
 		log.Printf("[Session] ASR 结果协程结束")
 	}()
@@ -294,6 +357,10 @@ func (s *Session) init() error {
 
 // handleAudio 处理音频数据
 func (s *Session) handleAudio(audioBase64 string) error {
+	if s.getState() != StateListening {
+		return nil
+	}
+
 	if err := s.ensureASRStream(); err != nil {
 		return err
 	}
@@ -418,10 +485,12 @@ func (s *Session) finishUserTurn() error {
 	s.audioReceivingSent = false
 	s.sendTurnStatus(turnState.turnIndex, TurnStateUserStopReceived, "", "")
 
+	turnBuffer := s.beginTurnASRFinalization()
+
 	// 每轮 stop 后主动结束当前 ASR 会话，避免上游 idle timeout 影响下一轮。
 	s.closeASRStream()
 	s.sendTurnStatus(turnState.turnIndex, TurnStateASRFinalizing, "asr", "")
-	userText, userTextSource, asrFinalAt := s.collectUserTextWithGrace()
+	userText, userTextSource, asrFinalAt := s.collectUserTextWithGrace(turnBuffer)
 	turnState.userText = userText
 	turnState.userTextSource = userTextSource
 	turnState.asrFinalAt = asrFinalAt
@@ -963,10 +1032,61 @@ func (s *Session) sendError(errMsg string) {
 	})
 }
 
+func (s *Session) getState() SessionState {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.state
+}
+
 func (s *Session) setState(next SessionState, reason string) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
 	prev := s.state
 	s.state = next
 	log.Printf("[Session] 状态切换: %s -> %s, reason=%s", sessionStateString(prev), sessionStateString(next), reason)
+}
+
+func (s *Session) ensureCurrentTurnASRBuffer() *asrTurnBuffer {
+	s.asrTextMu.Lock()
+	defer s.asrTextMu.Unlock()
+	if s.currentTurnASRBuffer == nil {
+		s.currentTurnASRBuffer = &asrTurnBuffer{}
+	}
+	return s.currentTurnASRBuffer
+}
+
+func (s *Session) beginTurnASRFinalization() *asrTurnBuffer {
+	s.asrTextMu.Lock()
+	defer s.asrTextMu.Unlock()
+
+	if s.currentTurnASRBuffer == nil {
+		s.currentTurnASRBuffer = &asrTurnBuffer{}
+	}
+	s.finalizingTurnASRBuffer = s.currentTurnASRBuffer
+	s.currentTurnASRBuffer = nil
+	return s.finalizingTurnASRBuffer
+}
+
+func (s *Session) finishTurnASRFinalization(buffer *asrTurnBuffer) {
+	if buffer == nil {
+		return
+	}
+
+	s.asrTextMu.Lock()
+	defer s.asrTextMu.Unlock()
+	if s.finalizingTurnASRBuffer == buffer {
+		s.finalizingTurnASRBuffer = nil
+	}
+}
+
+func (s *Session) shouldForwardASRResult(buffer *asrTurnBuffer) bool {
+	if buffer == nil || s.getState() != StateListening {
+		return false
+	}
+
+	s.asrTextMu.RLock()
+	defer s.asrTextMu.RUnlock()
+	return s.currentTurnASRBuffer == buffer
 }
 
 func sessionStateString(state SessionState) string {
@@ -992,14 +1112,14 @@ func truncateForLog(s string, maxLen int) string {
 }
 
 // stop 后给 ASR 一小段收尾时间，尽量拿到 SentenceEnd 最终文本，减少尾字丢失。
-func (s *Session) collectUserTextWithGrace() (string, turntrace.UserTextSource, *time.Time) {
-	readBuffers := func() (string, string) {
-		s.asrTextMu.Lock()
-		defer s.asrTextMu.Unlock()
-		return strings.TrimSpace(s.currentUserText.String()), strings.TrimSpace(s.currentASRText)
+func (s *Session) collectUserTextWithGrace(buffer *asrTurnBuffer) (string, turntrace.UserTextSource, *time.Time) {
+	defer s.finishTurnASRFinalization(buffer)
+
+	readBuffers := func() (string, string, *time.Time) {
+		return buffer.snapshot()
 	}
 
-	initialFinal, initialInterim := readBuffers()
+	initialFinal, initialInterim, _ := readBuffers()
 	waitBudget := 250 * time.Millisecond
 	if initialFinal != "" || initialInterim != "" {
 		waitBudget = 800 * time.Millisecond
@@ -1007,22 +1127,14 @@ func (s *Session) collectUserTextWithGrace() (string, turntrace.UserTextSource, 
 
 	deadline := time.Now().Add(waitBudget)
 	for time.Now().Before(deadline) {
-		finalText, interimText := readBuffers()
+		finalText, interimText, _ := readBuffers()
 		if finalText != "" && interimText == "" {
 			break
 		}
 		time.Sleep(80 * time.Millisecond)
 	}
 
-	s.asrTextMu.Lock()
-	defer s.asrTextMu.Unlock()
-
-	finalText := strings.TrimSpace(s.currentUserText.String())
-	interimText := strings.TrimSpace(s.currentASRText)
-	asrFinalAt := s.lastASRFinalAt
-	s.currentUserText.Reset()
-	s.currentASRText = ""
-	s.lastASRFinalAt = nil
+	finalText, interimText, asrFinalAt := buffer.consume()
 
 	if finalText != "" {
 		return finalText, turntrace.UserTextSourceFinal, asrFinalAt
