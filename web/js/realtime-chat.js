@@ -49,15 +49,13 @@ let processingTimeouts = [];
 let processingStateActive = false;
 let longWaitDismissed = false;
 let processingStatusLevel = 0;
-let narrationTranscriptFinal = '';
-let narrationTranscriptInterim = '';
-
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
 const SAMPLE_RATE_OUTPUT = 16000; // 输出采样率（实时 TTS 默认值）
 const CHUNK_SIZE = 3200;          // 每次发送的音频块大小
 const VAD_SILENCE_MS = 1200;      // 语音结束静音阈值（适当放大，减少截断）
 const NARRATION_VAD_SILENCE_MS = 3000;
+const NARRATION_INSTRUCTION_TEXT = '您慢慢说，我在听着，也在记录。\n讲完了点左上角「← 结束对话」就好。';
 const AUDIO_WORKLET_PROCESSOR_NAME = 'pcm-capture-processor';
 const SPEECH_START_RMS = 0.006;   // 超过该阈值判定为开始说话
 const SPEECH_END_RMS = 0.0035;    // 低于该阈值并持续静音判定为结束
@@ -210,7 +208,7 @@ async function connectWebSocket() {
         ws.onopen = () => {
             DEBUG_MODE && console.log('WebSocket 已连接');
             isConnected = true;
-            updateAIText(isNarrationMode ? '正在进入自述模式，请先听记录师说明' : '连接成功，请先听记录师开场');
+            updateAIText(isNarrationMode ? NARRATION_INSTRUCTION_TEXT : '连接成功，请先听记录师开场');
             updateVoiceStatus('请稍候');
             requestMicrophoneEarly();
         };
@@ -254,14 +252,13 @@ function handleServerMessage(message) {
 
         case 'asr':
             DEBUG_MODE && console.log('用户说:', message.text);
-            if (isNarrationMode) {
-                updateNarrationTranscript(message.text || '', message.is_final === true);
-            }
             break;
 
         case 'response':
             currentAIResponse = message.text || '';
-            updateAIText(currentAIResponse);
+            if (!isNarrationMode) {
+                updateAIText(currentAIResponse);
+            }
             break;
 
         case 'done':
@@ -978,25 +975,6 @@ function showToast(message) {
 // 更新 AI 文字内容
 function updateAIText(text) {
     document.getElementById('aiText').textContent = text;
-}
-
-function updateNarrationTranscript(text, isFinal) {
-    const cleanText = typeof text === 'string' ? text.trim() : '';
-    if (isFinal) {
-        if (cleanText) {
-            narrationTranscriptFinal = narrationTranscriptFinal
-                ? `${narrationTranscriptFinal}\n${cleanText}`
-                : cleanText;
-        }
-        narrationTranscriptInterim = '';
-    } else {
-        narrationTranscriptInterim = cleanText;
-    }
-
-    const transcriptText = [narrationTranscriptFinal, narrationTranscriptInterim]
-        .filter(Boolean)
-        .join('\n');
-    updateAIText(transcriptText || '您慢慢讲，我会把您说的内容实时记下来。');
 }
 
 // 更新用户语音状态
