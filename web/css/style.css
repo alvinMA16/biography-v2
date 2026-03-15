@@ -1237,6 +1237,8 @@ body {
     stroke: currentColor;
     fill: none;
     stroke-width: 1.8;
+    flex-shrink: 0;
+    overflow: visible;
 }
 .topic-refresh-link:hover:not(:disabled) { color: var(--color-accent); }
 .topic-refresh-link:disabled { opacity: 0.4; cursor: default; }
