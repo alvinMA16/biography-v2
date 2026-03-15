@@ -1204,12 +1204,7 @@ body {
 }
 
 .topic-option-free {
-    background: transparent;
-    border-style: dashed;
-    border-color: var(--color-border);
-}
-.topic-option-free .topic-title {
-    color: var(--color-text-light);
+    border-style: solid;
 }
 
 /* 主区域 */
@@ -1267,7 +1262,7 @@ body {
     white-space: nowrap;
 }
 
-/* 自述模式 - 文字链接 */
+/* 自述模式 - 按钮样式 */
 .topic-section-secondary { text-align: center; padding: 4px 0 0; }
 .topic-narration-link {
     display: inline-flex;
@@ -1275,15 +1270,23 @@ body {
     align-items: center;
     gap: 4px;
     cursor: pointer;
-    padding: 10px 20px;
-    border-radius: 8px;
-    transition: background 0.2s;
+    padding: 12px 24px;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: #fff;
+    transition: border-color 0.2s, background 0.2s;
 }
-.topic-narration-link:active { background: rgba(139, 69, 19, 0.05); }
+.topic-narration-link:active {
+    border-color: var(--color-accent);
+    background: rgba(139, 69, 19, 0.05);
+}
 @media (hover: hover) and (pointer: fine) {
-    .topic-narration-link:hover { background: rgba(139, 69, 19, 0.03); }
+    .topic-narration-link:hover {
+        border-color: var(--color-accent);
+        background: rgba(139, 69, 19, 0.03);
+    }
 }
-.topic-narration-title { font-size: 0.95em; color: var(--color-accent); }
+.topic-narration-title { font-size: 0.95em; color: var(--color-accent); font-weight: 500; }
 .topic-narration-desc { font-size: 0.78em; color: var(--color-text-light); }
 
 @keyframes topicRefreshSpin {
