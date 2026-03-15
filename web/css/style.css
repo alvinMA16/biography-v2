@@ -1239,6 +1239,8 @@ body {
     stroke-width: 1.8;
     flex-shrink: 0;
     overflow: visible;
+    position: relative;
+    top: -1px;
 }
 .topic-refresh-link:hover:not(:disabled) { color: var(--color-accent); }
 .topic-refresh-link:disabled { opacity: 0.4; cursor: default; }
