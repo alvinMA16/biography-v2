@@ -2,7 +2,12 @@ package realtime
 
 import (
 	"encoding/base64"
+	"errors"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/peizhengma/biography-v2/internal/provider/llm"
 )
 
 func TestEnsureFirstSessionClosingText(t *testing.T) {
@@ -82,5 +87,51 @@ func TestTurnASRBufferIsolationAcrossTurns(t *testing.T) {
 	secondText, _, _ := secondTurn.consume()
 	if secondText != "第二轮内容。" {
 		t.Fatalf("expected second turn text only, got %q", secondText)
+	}
+}
+
+func TestShouldFlushNarrationBatch(t *testing.T) {
+	now := time.Now()
+	startedAt := now.Add(-13 * time.Second)
+
+	if !shouldFlushNarrationBatch("这是一段还不算太长的自述内容。", &startedAt, now, false) {
+		t.Fatal("expected narration batch to flush after max delay")
+	}
+	if !shouldFlushNarrationBatch(strings.Repeat("讲", narrationPersistRuneThreshold), nil, now, false) {
+		t.Fatal("expected narration batch to flush after rune threshold")
+	}
+	if shouldFlushNarrationBatch("短句。", nil, now, false) {
+		t.Fatal("expected short narration batch not to flush yet")
+	}
+}
+
+func TestPrepareNarrationMessagesForSaveFallsBackToMemory(t *testing.T) {
+	session := &Session{
+		config: &SessionConfig{Mode: ModeNarration},
+		persistFunc: func(role, content string) error {
+			return errors.New("persist down")
+		},
+		messages: make([]llm.Message, 0),
+	}
+
+	if err := session.queueNarrationText("第一段自述。"); err != nil {
+		t.Fatalf("queue narration text: %v", err)
+	}
+
+	session.PrepareNarrationMessagesForSave()
+
+	messages := session.GetMessages()
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 in-memory message, got %d", len(messages))
+	}
+	if messages[0].Role != "user" || messages[0].Content != "第一段自述。" {
+		t.Fatalf("unexpected narration message: %+v", messages[0])
+	}
+}
+
+func TestResolveSessionModeAllowsNarration(t *testing.T) {
+	mode := resolveSessionMode("narration", false)
+	if mode != ModeNarration {
+		t.Fatalf("expected narration mode, got %s", mode)
 	}
 }

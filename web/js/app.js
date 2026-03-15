@@ -256,6 +256,7 @@ function renderTopicOptions(options, hasMore, isRefreshing) {
     const refreshDisabled = isRefreshing || !hasMore;
     const refreshLabel = isRefreshing ? '正在换一批...' : (hasMore ? '换一批' : '先看看这些');
     const refreshClass = isRefreshing ? 'btn topic-refresh-btn is-refreshing' : 'btn topic-refresh-btn';
+    const narrationClass = 'btn topic-refresh-btn topic-narration-btn';
     const refreshIcon = `
         <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20 5v6h-6"></path>
@@ -272,6 +273,9 @@ function renderTopicOptions(options, hasMore, isRefreshing) {
             <div class="topic-title">我有其他想说的</div>
         </div>
         <div class="topic-actions">
+            <button class="${narrationClass}" onclick="selectNarrationMode()">
+                <span>自述模式</span>
+            </button>
             <button class="${refreshClass}" onclick="loadTopicOptions()" ${refreshDisabled ? 'disabled' : ''}>
                 ${refreshIcon}
                 <span>${refreshLabel}</span>
@@ -293,12 +297,33 @@ async function selectFreeTopic() {
     await selectTopic(null, '__free__', '好的呀，今天我听您的。', '', '', null, null);
 }
 
+async function selectNarrationMode() {
+    closeTopicModal();
+
+    try {
+        const result = await api.conversation.start({ mode: 'narration' });
+        storage.set('currentConversationId', result.id);
+        storage.set('selectedConversationMode', 'narration');
+        storage.remove('selectedTopic');
+        storage.remove('selectedTopicGreeting');
+        storage.remove('selectedTopicContext');
+        storage.remove('selectedTopicId');
+        storage.remove('selectedTopicSource');
+        storage.remove('selectedTopicAgeStart');
+        storage.remove('selectedTopicAgeEnd');
+        window.location.href = 'chat.html';
+    } catch (error) {
+        console.error('开始自述模式失败:', error);
+        alert('开始自述失败: ' + error.message);
+    }
+}
+
 async function selectTopic(topicId, topic, greeting, context, topicSource, ageStart, ageEnd) {
     closeTopicModal();
 
     try {
         // 创建新对话
-        const conversationInput = {};
+        const conversationInput = { mode: 'normal' };
         if (topic && topic !== '__free__') {
             conversationInput.topic = topic;
             conversationInput.greeting = greeting || '';
@@ -310,6 +335,7 @@ async function selectTopic(topicId, topic, greeting, context, topicSource, ageSt
         }
         const result = await api.conversation.start(conversationInput);
         storage.set('currentConversationId', result.id);
+        storage.set('selectedConversationMode', 'normal');
 
         // 存储选择的话题信息
         storage.set('selectedTopic', topic);
@@ -539,6 +565,7 @@ async function startFirstSession() {
         // 创建新对话
         const result = await api.conversation.start();
         storage.set('currentConversationId', result.id);
+        storage.remove('selectedConversationMode');
         // 跳转到对话页面（会自动检测到未完成首次对话）
         window.location.href = 'chat.html';
     } catch (error) {

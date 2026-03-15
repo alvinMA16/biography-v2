@@ -11,6 +11,7 @@ import (
 	"sync"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"github.com/peizhengma/biography-v2/internal/domain/turntrace"
@@ -33,6 +34,8 @@ const (
 const greetingAudioCacheMaxEntries = 128
 const realtimeTTSSampleRate = 16000
 const realtimeLLMHedgeAfter = 9 * time.Second
+const narrationPersistRuneThreshold = 100
+const narrationPersistMaxDelay = 12 * time.Second
 
 var (
 	greetingAudioCacheMu sync.RWMutex
@@ -59,6 +62,9 @@ type Session struct {
 	firstSessionCompleted bool
 	livePersistEnabled    bool
 	mu                    sync.RWMutex
+	narrationMu           sync.Mutex
+	narrationPersistText  string
+	narrationBufferSince  *time.Time
 
 	// 当前轮次的 ASR 文本缓冲，按 turn 隔离，避免旧流结果串入新轮。
 	currentTurnASRBuffer    *asrTurnBuffer
@@ -227,8 +233,13 @@ func (s *Session) Run() error {
 				continue
 			}
 			log.Printf("[Session] 收到 stop: 准备结束用户本轮输入")
-			// 用户停止说话，生成回复
-			if err := s.finishUserTurn(); err != nil {
+			var err error
+			if s.isNarrationMode() {
+				err = s.finishNarrationTurn()
+			} else {
+				err = s.finishUserTurn()
+			}
+			if err != nil {
 				log.Printf("[Session] 生成回复错误: %v", err)
 				s.sendError(err.Error())
 			}
@@ -280,6 +291,11 @@ func (s *Session) ensureASRStream() error {
 			}
 
 			turnBuffer.appendResult(result.Text, result.IsFinal)
+			if s.isNarrationMode() && result.IsFinal {
+				if err := s.queueNarrationText(result.Text); err != nil {
+					log.Printf("[Session] 自述内容暂存失败: %v", err)
+				}
+			}
 
 			// 只把当前 listening turn 的识别结果回显给前端，避免旧流结果污染新轮展示。
 			if s.shouldForwardASRResult(turnBuffer) {
@@ -318,25 +334,19 @@ func (s *Session) init() error {
 		return fmt.Errorf("build system prompt: %w", err)
 	}
 
-	s.mu.Lock()
-	s.messages = append(s.messages, llm.Message{
-		Role:    "system",
-		Content: systemPrompt,
-	})
-	s.mu.Unlock()
+	if strings.TrimSpace(systemPrompt) != "" {
+		s.appendConversationMessage("system", systemPrompt)
+	}
 
 	// 发送开场白
 	greeting := s.getGreeting()
 	if greeting != "" {
 		s.sendTurnStatus(0, TurnStateGreetingPreparing, "", "")
 		log.Printf("[Session] 发送开场白: len=%d", len(greeting))
-		s.mu.Lock()
-		s.messages = append(s.messages, llm.Message{
-			Role:    "assistant",
-			Content: greeting,
-		})
-		s.mu.Unlock()
-		s.tryPersistMessage("assistant", greeting)
+		if !s.isNarrationMode() {
+			s.appendConversationMessage("assistant", greeting)
+			s.tryPersistMessage("assistant", greeting)
+		}
 
 		// 发送文字
 		s.sendResponse(greeting)
@@ -352,6 +362,47 @@ func (s *Session) init() error {
 	// 通知前端当前轮次已结束，可以开始录音。
 	s.sendDone()
 	s.sendTurnStatus(0, TurnStateReadyForUser, "", "")
+	return nil
+}
+
+func (s *Session) finishNarrationTurn() error {
+	turnState := s.newTurnDiagnostic(time.Now())
+	s.audioReceivingSent = false
+	s.sendTurnStatus(turnState.turnIndex, TurnStateUserStopReceived, "", "")
+
+	turnBuffer := s.beginTurnASRFinalization()
+	s.closeASRStream()
+	s.sendTurnStatus(turnState.turnIndex, TurnStateASRFinalizing, "asr", "")
+
+	userText, userTextSource, asrFinalAt := s.collectUserTextWithGrace(turnBuffer)
+	turnState.userText = userText
+	turnState.userTextSource = userTextSource
+	turnState.asrFinalAt = asrFinalAt
+
+	switch userTextSource {
+	case turntrace.UserTextSourceFinal:
+		s.sendTurnStatus(turnState.turnIndex, TurnStateASRFinalReceived, "asr", "")
+	case turntrace.UserTextSourceInterim:
+		s.sendTurnStatus(turnState.turnIndex, TurnStateASRInterimFallback, "asr", "")
+		if err := s.queueNarrationText(userText); err != nil {
+			log.Printf("[Session] 追加自述 fallback 文本失败: %v", err)
+		}
+	default:
+		s.sendTurnStatus(turnState.turnIndex, TurnStateASREmpty, "asr", "")
+	}
+
+	if _, err := s.flushNarrationBuffer(true, false); err != nil {
+		log.Printf("[Session] 自述分批落库失败，将在后续继续重试: %v", err)
+	}
+
+	doneAt := time.Now()
+	s.sendDone()
+	turnState.doneSentAt = &doneAt
+	s.sendTurnStatus(turnState.turnIndex, TurnStateTurnDoneSent, "", "")
+	s.persistTurnDiagnostic(turnState)
+
+	s.setState(StateListening, "自述分段完成，继续监听")
+	s.sendTurnStatus(turnState.turnIndex, TurnStateReadyForUser, "", "")
 	return nil
 }
 
@@ -735,6 +786,10 @@ func fallbackAssistantText(raw string) string {
 
 // buildSystemPrompt 构建系统 prompt
 func (s *Session) buildSystemPrompt() (string, error) {
+	if s.isNarrationMode() {
+		return "", nil
+	}
+
 	var tmplStr string
 	if s.config.Mode == ModeFirstSession {
 		tmplStr = prompt.FirstSessionSystemPrompt
@@ -774,6 +829,9 @@ func (s *Session) buildSystemPrompt() (string, error) {
 
 // getGreeting 获取开场白
 func (s *Session) getGreeting() string {
+	if s.isNarrationMode() {
+		return prompt.NarrationGreeting
+	}
 	if s.config.Mode == ModeFirstSession {
 		// 根据记录师性别选择对应的开场白
 		if s.config.RecorderGender == "male" {
@@ -785,6 +843,133 @@ func (s *Session) getGreeting() string {
 		return s.config.TopicGreeting
 	}
 	return ""
+}
+
+func (s *Session) isNarrationMode() bool {
+	return s != nil && s.config != nil && s.config.Mode == ModeNarration
+}
+
+func (s *Session) appendConversationMessage(role, content string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messages = append(s.messages, llm.Message{
+		Role:    role,
+		Content: content,
+	})
+}
+
+func shouldFlushNarrationBatch(text string, startedAt *time.Time, now time.Time, force bool) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	if force {
+		return true
+	}
+	if utf8.RuneCountInString(text) >= narrationPersistRuneThreshold {
+		return true
+	}
+	if startedAt != nil && now.Sub(*startedAt) >= narrationPersistMaxDelay {
+		return true
+	}
+	return false
+}
+
+func (s *Session) queueNarrationText(text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+
+	now := time.Now()
+
+	s.narrationMu.Lock()
+	if s.narrationPersistText == "" {
+		s.narrationPersistText = text
+		s.narrationBufferSince = &now
+	} else {
+		s.narrationPersistText += "\n" + text
+	}
+	persistText := s.narrationPersistText
+	startedAt := s.narrationBufferSince
+	s.narrationMu.Unlock()
+
+	if shouldFlushNarrationBatch(persistText, startedAt, now, false) {
+		_, err := s.flushNarrationBuffer(false, false)
+		return err
+	}
+	return nil
+}
+
+func (s *Session) flushNarrationBuffer(force bool, fallbackToMemory bool) (bool, error) {
+	if !s.isNarrationMode() {
+		return false, nil
+	}
+
+	now := time.Now()
+
+	s.narrationMu.Lock()
+	text := strings.TrimSpace(s.narrationPersistText)
+	startedAt := s.narrationBufferSince
+	if !shouldFlushNarrationBatch(text, startedAt, now, force) {
+		s.narrationMu.Unlock()
+		return false, nil
+	}
+	s.narrationMu.Unlock()
+
+	persist := s.persistFunc
+	if persist != nil {
+		if err := persist("user", text); err != nil {
+			if fallbackToMemory {
+				s.appendConversationMessage("user", text)
+				s.clearNarrationPersistedText(text)
+				return true, nil
+			}
+			return false, err
+		}
+	}
+
+	s.appendConversationMessage("user", text)
+	s.clearNarrationPersistedText(text)
+	return true, nil
+}
+
+func (s *Session) clearNarrationPersistedText(batch string) {
+	s.narrationMu.Lock()
+	defer s.narrationMu.Unlock()
+
+	current := strings.TrimSpace(s.narrationPersistText)
+	if current == "" {
+		s.narrationPersistText = ""
+		s.narrationBufferSince = nil
+		return
+	}
+
+	switch {
+	case current == batch:
+		s.narrationPersistText = ""
+	case strings.HasPrefix(current, batch+"\n"):
+		s.narrationPersistText = strings.TrimPrefix(current, batch+"\n")
+	case strings.HasPrefix(current, batch):
+		s.narrationPersistText = strings.TrimSpace(strings.TrimPrefix(current, batch))
+	}
+
+	if strings.TrimSpace(s.narrationPersistText) == "" {
+		s.narrationPersistText = ""
+		s.narrationBufferSince = nil
+		return
+	}
+
+	now := time.Now()
+	s.narrationBufferSince = &now
+}
+
+func (s *Session) PrepareNarrationMessagesForSave() {
+	if !s.isNarrationMode() {
+		return
+	}
+	if _, err := s.flushNarrationBuffer(true, true); err != nil {
+		log.Printf("[Session] 自述内容收尾落库失败，回退内存补漏: %v", err)
+	}
 }
 
 func (s *Session) greetingCacheKey(text string) string {

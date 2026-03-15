@@ -302,6 +302,7 @@ function clearTransientChatState(options = {}) {
     const { includeRecorder = false } = options;
     const keys = [
         'currentConversationId',
+        'selectedConversationMode',
         'selectedTopic',
         'selectedTopicGreeting',
         'selectedTopicContext',

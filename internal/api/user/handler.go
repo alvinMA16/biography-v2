@@ -404,6 +404,13 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 		return
 	}
 
+	switch input.Mode {
+	case "", conversation.ModeNormal, conversation.ModeNarration:
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation mode"})
+		return
+	}
+
 	var selectedTopicID uuid.UUID
 	if strings.TrimSpace(input.TopicID) != "" {
 		parsedID, err := uuid.Parse(strings.TrimSpace(input.TopicID))
@@ -412,6 +419,14 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 			return
 		}
 		selectedTopicID = parsedID
+	}
+
+	if input.Mode == conversation.ModeNarration {
+		input.Topic = ""
+		input.Greeting = ""
+		input.Context = ""
+		input.TopicID = ""
+		input.TopicSource = ""
 	}
 
 	conv, err := h.convService.Create(c.Request.Context(), userID, &input)

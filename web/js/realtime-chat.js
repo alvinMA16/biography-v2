@@ -7,6 +7,7 @@ const DEBUG_MODE = window.location.hostname === 'localhost' || window.location.h
 
 let conversationId = null;
 let isFirstSessionMode = false;  // 是否是首次对话
+let isNarrationMode = false;  // 是否是自述模式
 let autoEndTriggered = false;  // 防止自动结束重复触发
 let recorderName = '记录师';  // 记录师名字，默认值
 
@@ -48,12 +49,15 @@ let processingTimeouts = [];
 let processingStateActive = false;
 let longWaitDismissed = false;
 let processingStatusLevel = 0;
+let narrationTranscriptFinal = '';
+let narrationTranscriptInterim = '';
 
 // 配置
 const SAMPLE_RATE_INPUT = 16000;   // 输入采样率
 const SAMPLE_RATE_OUTPUT = 16000; // 输出采样率（实时 TTS 默认值）
 const CHUNK_SIZE = 3200;          // 每次发送的音频块大小
 const VAD_SILENCE_MS = 1200;      // 语音结束静音阈值（适当放大，减少截断）
+const NARRATION_VAD_SILENCE_MS = 3000;
 const AUDIO_WORKLET_PROCESSOR_NAME = 'pcm-capture-processor';
 const SPEECH_START_RMS = 0.006;   // 超过该阈值判定为开始说话
 const SPEECH_END_RMS = 0.0035;    // 低于该阈值并持续静音判定为结束
@@ -72,6 +76,7 @@ window.onload = async function() {
     }
 
     conversationId = storage.get('currentConversationId');
+    isNarrationMode = storage.get('selectedConversationMode') === 'narration';
 
     if (!conversationId) {
         alert('未找到对话');
@@ -156,6 +161,7 @@ async function connectWebSocket() {
     const selectedTopicSource = storage.get('selectedTopicSource');
     const selectedGreeting = storage.get('selectedTopicGreeting');
     const selectedContext = storage.get('selectedTopicContext');
+    const selectedConversationMode = storage.get('selectedConversationMode');
     // 使用后清除，避免下次对话重复使用
     storage.remove('selectedTopic');
     storage.remove('selectedTopicId');
@@ -170,7 +176,9 @@ async function connectWebSocket() {
         conversation_id: conversationId,
         token: token,
     });
-    if (isFirstSessionMode) {
+    if (selectedConversationMode === 'narration') {
+        params.set('mode', 'narration');
+    } else if (isFirstSessionMode) {
         params.set('mode', 'first_session');
     }
 
@@ -202,7 +210,7 @@ async function connectWebSocket() {
         ws.onopen = () => {
             DEBUG_MODE && console.log('WebSocket 已连接');
             isConnected = true;
-            updateAIText('连接成功，请先听记录师开场');
+            updateAIText(isNarrationMode ? '正在进入自述模式，请先听记录师说明' : '连接成功，请先听记录师开场');
             updateVoiceStatus('请稍候');
             requestMicrophoneEarly();
         };
@@ -246,6 +254,9 @@ function handleServerMessage(message) {
 
         case 'asr':
             DEBUG_MODE && console.log('用户说:', message.text);
+            if (isNarrationMode) {
+                updateNarrationTranscript(message.text || '', message.is_final === true);
+            }
             break;
 
         case 'response':
@@ -260,7 +271,7 @@ function handleServerMessage(message) {
             userSpeechActive = false;
             lastVoiceDetectedAt = Date.now();
             setVoiceActive(false);
-            updateVoiceStatus('我在听，请您慢慢说');
+            updateVoiceStatus(isNarrationMode ? '您慢慢讲，我在记录' : '我在听，请您慢慢说');
             shouldResumeRecording = true;
             maybeResumeRecordingAfterPlayback();
             break;
@@ -315,6 +326,13 @@ function handleTurnStatus(message) {
         case 'asr_finalizing':
         case 'asr_final_received':
         case 'asr_interim_fallback':
+            if (isNarrationMode) {
+                updateVoiceStatus('您慢慢讲，我在记录');
+                break;
+            }
+            applyProcessingState();
+            break;
+
         case 'assistant_response_sent':
         case 'llm_request_started':
         case 'llm_response_received':
@@ -366,12 +384,23 @@ function applyListeningState() {
     userSpeechActive = false;
     lastVoiceDetectedAt = Date.now();
     setVoiceActive(false);
-    updateVoiceStatus('我在听，请您慢慢说');
+    updateVoiceStatus(isNarrationMode ? '您慢慢讲，我在记录' : '我在听，请您慢慢说');
     shouldResumeRecording = true;
     maybeResumeRecordingAfterPlayback();
 }
 
 function applyProcessingState() {
+    if (isNarrationMode) {
+        clearProcessingTimeouts();
+        isAISpeaking = false;
+        awaitingResponse = false;
+        sentVoiceSinceLastStop = false;
+        userSpeechActive = false;
+        setVoiceActive(false);
+        updateVoiceStatus('您慢慢讲，我在记录');
+        return;
+    }
+
     const wasActive = processingStateActive;
     startProcessingTimeouts();
     isAISpeaking = false;
@@ -521,7 +550,7 @@ async function startRecording() {
         }
 
         isRecording = true;
-        updateVoiceStatus('我在听，请您慢慢说');
+        updateVoiceStatus(isNarrationMode ? '您慢慢讲，我在记录' : '我在听，请您慢慢说');
         setVoiceActive(false);
         lastVoiceDetectedAt = Date.now();
         sentVoiceSinceLastStop = false;
@@ -532,14 +561,15 @@ async function startRecording() {
                 if (!isRecording || !isConnected || isAISpeaking) return;
                 if (awaitingResponse) return;
                 if (!sentVoiceSinceLastStop) return;
-                if (Date.now() - lastVoiceDetectedAt < VAD_SILENCE_MS) return;
+                const silenceThreshold = isNarrationMode ? NARRATION_VAD_SILENCE_MS : VAD_SILENCE_MS;
+                if (Date.now() - lastVoiceDetectedAt < silenceThreshold) return;
 
                 // 一次发言结束，通知服务端开始生成回复
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     flushPendingPCM(true);
                     awaitingResponse = true;
                     ws.send(JSON.stringify({ type: 'stop' }));
-                    updateVoiceStatus('请稍等，我记一下');
+                    updateVoiceStatus(isNarrationMode ? '您慢慢讲，我在记录' : '请稍等，我记一下');
                 }
                 sentVoiceSinceLastStop = false;
                 userSpeechActive = false;
@@ -669,7 +699,7 @@ function handleInputChunk(inputData) {
     if (rms >= SPEECH_START_RMS) {
         if (!userSpeechActive) {
             userSpeechActive = true;
-            updateVoiceStatus('您说，我在听');
+            updateVoiceStatus(isNarrationMode ? '您慢慢讲，我在记录' : '您说，我在听');
             setVoiceActive(true);
             // 首次触发说话时，把阈值之前的短暂语音一并补发，减少起句丢字
             if (preSpeechPcmBytes.length > 0) {
@@ -935,6 +965,25 @@ function updateAIText(text) {
     document.getElementById('aiText').textContent = text;
 }
 
+function updateNarrationTranscript(text, isFinal) {
+    const cleanText = typeof text === 'string' ? text.trim() : '';
+    if (isFinal) {
+        if (cleanText) {
+            narrationTranscriptFinal = narrationTranscriptFinal
+                ? `${narrationTranscriptFinal}\n${cleanText}`
+                : cleanText;
+        }
+        narrationTranscriptInterim = '';
+    } else {
+        narrationTranscriptInterim = cleanText;
+    }
+
+    const transcriptText = [narrationTranscriptFinal, narrationTranscriptInterim]
+        .filter(Boolean)
+        .join('\n');
+    updateAIText(transcriptText || '您慢慢讲，我会把您说的内容实时记下来。');
+}
+
 // 更新用户语音状态
 function updateVoiceStatus(text) {
     document.getElementById('voiceStatus').textContent = text;
@@ -1149,6 +1198,7 @@ function navigateHome() {
         ws.close();
     }
     storage.remove('currentConversationId');
+    storage.remove('selectedConversationMode');
     window.location.href = 'index.html';
 }
 

@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	ErrNotFound          = errors.New("conversation not found")
-	ErrNotOwner          = errors.New("not conversation owner")
-	ErrAlreadyCompleted  = errors.New("conversation already completed")
-	ErrInvalidStatus     = errors.New("invalid status")
+	ErrNotFound         = errors.New("conversation not found")
+	ErrNotOwner         = errors.New("not conversation owner")
+	ErrAlreadyCompleted = errors.New("conversation already completed")
+	ErrInvalidStatus    = errors.New("invalid status")
 )
 
 // Service 对话服务
@@ -30,12 +30,17 @@ func New(repo *convRepo.Repository) *Service {
 // Create 创建对话
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, input *conversation.CreateConversationInput) (*conversation.Conversation, error) {
 	now := time.Now()
+	mode := input.Mode
+	if mode == "" {
+		mode = conversation.ModeNormal
+	}
 	c := &conversation.Conversation{
 		ID:        uuid.New(),
 		UserID:    userID,
 		Topic:     nilIfEmpty(input.Topic),
 		Greeting:  nilIfEmpty(input.Greeting),
 		Context:   nilIfEmpty(input.Context),
+		Mode:      mode,
 		Status:    conversation.StatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,

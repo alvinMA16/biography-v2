@@ -236,6 +236,7 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	session.PrepareNarrationMessagesForSave()
 	messages := session.GetMessages()
 
 	// 只有 user 和 assistant 消息，跳过 system
@@ -246,8 +247,13 @@ func (h *Handler) saveConversation(userID uuid.UUID, config *SessionConfig, sess
 		}
 	}
 
+	minMessages := 2
+	if config.Mode == ModeNarration {
+		minMessages = 1
+	}
+
 	// 如果没有对话内容，跳过保存
-	if len(userMessages) < 2 {
+	if len(userMessages) < minMessages {
 		log.Printf("[Realtime] 对话内容不足，跳过保存: user_id=%s", userID)
 		return
 	}
@@ -299,6 +305,7 @@ func (h *Handler) resolveConversationID(ctx context.Context, userID uuid.UUID, c
 		Topic:    config.TopicTitle,
 		Greeting: config.TopicGreeting,
 		Context:  config.TopicContext,
+		Mode:     conversation.Mode(config.Mode),
 	})
 	if err != nil {
 		return uuid.Nil, err
@@ -355,7 +362,7 @@ func countPersistedPrefix(existing []conversation.Message, expected []llm.Messag
 
 func resolveSessionMode(raw string, onboardingCompleted bool) Mode {
 	mode := Mode(strings.TrimSpace(raw))
-	if mode == ModeNormal || mode == ModeFirstSession {
+	if mode == ModeNormal || mode == ModeFirstSession || mode == ModeNarration {
 		return mode
 	}
 	if onboardingCompleted {

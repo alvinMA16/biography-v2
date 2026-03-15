@@ -1,5 +1,7 @@
 package realtime
 
+import domainConversation "github.com/peizhengma/biography-v2/internal/domain/conversation"
+
 // MessageType 消息类型
 type MessageType string
 
@@ -45,11 +47,12 @@ const (
 )
 
 // Mode 对话模式
-type Mode string
+type Mode = domainConversation.Mode
 
 const (
-	ModeNormal       Mode = "normal"        // 正常话题对话
-	ModeFirstSession Mode = "first_session" // 首次对话
+	ModeNormal       Mode = domainConversation.ModeNormal       // 正常话题对话
+	ModeFirstSession Mode = domainConversation.ModeFirstSession // 首次对话
+	ModeNarration    Mode = domainConversation.ModeNarration    // 自述模式
 )
 
 // ClientMessage 客户端消息

@@ -1210,6 +1210,8 @@ body {
 .topic-actions {
     display: flex;
     justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
     padding-top: 4px;
 }
 
@@ -1231,6 +1233,18 @@ body {
     background: var(--color-accent-light);
     border-color: var(--color-accent-light);
     color: #fff;
+}
+
+.topic-narration-btn {
+    background: #fff;
+    color: var(--color-text);
+    border-color: var(--color-border);
+}
+
+.topic-narration-btn:hover:not(:disabled) {
+    background: #f7f3ee;
+    border-color: var(--color-accent);
+    color: var(--color-text);
 }
 
 .topic-refresh-btn:disabled {

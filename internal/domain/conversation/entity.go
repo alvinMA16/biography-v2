@@ -7,6 +7,15 @@ import (
 	"github.com/peizhengma/biography-v2/internal/domain/turntrace"
 )
 
+// Mode 对话模式
+type Mode string
+
+const (
+	ModeNormal       Mode = "normal"
+	ModeFirstSession Mode = "first_session"
+	ModeNarration    Mode = "narration"
+)
+
 // Status 对话状态
 type Status string
 
@@ -28,6 +37,7 @@ type Conversation struct {
 	Greeting *string  `json:"greeting" db:"greeting"`
 	Context  *string  `json:"context" db:"context"`
 	Summary  *string  `json:"summary" db:"summary"`
+	Mode     Mode     `json:"mode" db:"mode"`
 
 	// 状态
 	Status Status `json:"status" db:"status"`
@@ -63,6 +73,7 @@ type CreateConversationInput struct {
 	Context     string `json:"context"`
 	TopicID     string `json:"topic_id"`
 	TopicSource string `json:"topic_source"`
+	Mode        Mode   `json:"mode"`
 }
 
 // ListConversationsFilter 对话列表过滤条件
