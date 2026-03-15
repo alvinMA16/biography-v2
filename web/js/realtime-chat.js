@@ -521,33 +521,7 @@ async function startRecording() {
         inputSinkGain = audioContext.createGain();
         inputSinkGain.gain.value = 0;
 
-        // 优先使用 AudioWorklet，避免 ScriptProcessorNode 弃用警告
-        if (audioContext.audioWorklet) {
-            await audioContext.audioWorklet.addModule(getAudioWorkletModuleURL());
-            audioWorklet = new AudioWorkletNode(audioContext, AUDIO_WORKLET_PROCESSOR_NAME, {
-                numberOfInputs: 1,
-                numberOfOutputs: 1,
-                channelCount: 1
-            });
-            audioWorklet.port.onmessage = (event) => {
-                if (!event.data) return;
-                handleInputChunk(event.data);
-            };
-
-            inputSource.connect(audioWorklet);
-            audioWorklet.connect(inputSinkGain);
-            inputSinkGain.connect(audioContext.destination);
-        } else {
-            DEBUG_MODE && console.warn('AudioWorklet 不可用，回退 ScriptProcessor');
-            scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-            scriptProcessor.onaudioprocess = (e) => {
-                handleInputChunk(e.inputBuffer.getChannelData(0));
-            };
-
-            inputSource.connect(scriptProcessor);
-            scriptProcessor.connect(inputSinkGain);
-            inputSinkGain.connect(audioContext.destination);
-        }
+        await setupInputProcessing();
 
         isRecording = true;
         updateVoiceStatus(isNarrationMode ? '您慢慢讲，我在记录' : '我在听，请您慢慢说');
@@ -578,10 +552,51 @@ async function startRecording() {
         }
 
     } catch (error) {
-        console.error('无法访问麦克风:', error);
-        updateAIText('无法访问麦克风，请检查权限');
-        updateVoiceStatus('麦克风错误');
+        console.error('启动录音失败:', error);
+        updateAIText(error && error.name === 'NotAllowedError'
+            ? '无法访问麦克风，请检查权限'
+            : '录音初始化失败，请刷新重试');
+        updateVoiceStatus(error && error.name === 'NotAllowedError' ? '麦克风错误' : '录音失败');
     }
+}
+
+async function setupInputProcessing() {
+    if (audioContext.audioWorklet) {
+        try {
+            await audioContext.audioWorklet.addModule(getAudioWorkletModuleURL());
+            audioWorklet = new AudioWorkletNode(audioContext, AUDIO_WORKLET_PROCESSOR_NAME, {
+                numberOfInputs: 1,
+                numberOfOutputs: 1,
+                channelCount: 1
+            });
+            audioWorklet.port.onmessage = (event) => {
+                if (!event.data) return;
+                handleInputChunk(event.data);
+            };
+
+            inputSource.connect(audioWorklet);
+            audioWorklet.connect(inputSinkGain);
+            inputSinkGain.connect(audioContext.destination);
+            return;
+        } catch (error) {
+            console.error('AudioWorklet 初始化失败，回退 ScriptProcessor:', error);
+            if (audioWorklet) {
+                audioWorklet.disconnect();
+                audioWorklet = null;
+            }
+            audioWorkletModuleURL = null;
+        }
+    }
+
+    DEBUG_MODE && console.warn('使用 ScriptProcessor 作为录音回退方案');
+    scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+    scriptProcessor.onaudioprocess = (e) => {
+        handleInputChunk(e.inputBuffer.getChannelData(0));
+    };
+
+    inputSource.connect(scriptProcessor);
+    scriptProcessor.connect(inputSinkGain);
+    inputSinkGain.connect(audioContext.destination);
 }
 
 function stopRecording() {
