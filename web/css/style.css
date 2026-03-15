@@ -1204,67 +1204,87 @@ body {
 }
 
 .topic-option-free {
-    border-style: solid;
-}
-
-.topic-actions {
-    display: flex;
-    justify-content: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding-top: 4px;
-}
-
-.topic-refresh-btn {
-    min-width: 156px;
-    margin-top: 0;
-    padding: 0.75em 1.3em;
-    background: var(--color-accent);
-    color: #fff;
-    border: 1px solid var(--color-accent);
-    display: inline-flex !important;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    overflow: visible;
-}
-
-.topic-refresh-btn:hover:not(:disabled) {
-    background: var(--color-accent-light);
-    border-color: var(--color-accent-light);
-    color: #fff;
-}
-
-.topic-narration-btn {
-    background: #fff;
-    color: var(--color-text);
+    background: transparent;
+    border-style: dashed;
     border-color: var(--color-border);
 }
-
-.topic-narration-btn:hover:not(:disabled) {
-    background: #f7f3ee;
-    border-color: var(--color-accent);
-    color: var(--color-text);
+.topic-option-free .topic-title {
+    color: var(--color-text-light);
 }
 
-.topic-refresh-btn:disabled {
-    opacity: 0.6;
-    cursor: default;
+/* 主区域 */
+.topic-section-primary {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
-.topic-refresh-btn svg {
-    width: 16px;
-    height: 16px;
+/* 换一批 - 右对齐文字链接 */
+.topic-refresh-row {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 4px;
+}
+.topic-refresh-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    color: var(--color-text-light);
+    font-size: 0.85em;
+    cursor: pointer;
+    padding: 4px 0;
+}
+.topic-refresh-link svg {
+    width: 14px;
+    height: 14px;
     stroke: currentColor;
     fill: none;
     stroke-width: 1.8;
-    flex-shrink: 0;
-    overflow: visible;
+}
+.topic-refresh-link:hover:not(:disabled) { color: var(--color-accent); }
+.topic-refresh-link:disabled { opacity: 0.4; cursor: default; }
+.topic-refresh-link.is-refreshing svg { animation: topicRefreshSpin 1s linear infinite; }
+
+/* "或者"分隔线 */
+.topic-divider-or {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 8px 0;
+}
+.topic-divider-or::before,
+.topic-divider-or::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--color-border);
+}
+.topic-divider-or span {
+    font-size: 0.85em;
+    color: var(--color-text-light);
+    white-space: nowrap;
 }
 
-.topic-refresh-btn.is-refreshing svg {
-    animation: topicRefreshSpin 1s linear infinite;
+/* 自述模式 - 文字链接 */
+.topic-section-secondary { text-align: center; padding: 4px 0 0; }
+.topic-narration-link {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 10px 20px;
+    border-radius: 8px;
+    transition: background 0.2s;
 }
+.topic-narration-link:active { background: rgba(139, 69, 19, 0.05); }
+@media (hover: hover) and (pointer: fine) {
+    .topic-narration-link:hover { background: rgba(139, 69, 19, 0.03); }
+}
+.topic-narration-title { font-size: 0.95em; color: var(--color-accent); }
+.topic-narration-desc { font-size: 0.78em; color: var(--color-text-light); }
 
 @keyframes topicRefreshSpin {
     from {

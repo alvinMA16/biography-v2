@@ -216,9 +216,20 @@ async function loadTopicOptions() {
 
         if (options.length === 0) {
             container.innerHTML = `
-                <p class="topic-empty">暂时没有准备好话题，您也可以直接开聊</p>
-                <div class="topic-option topic-option-free" onclick="selectFreeTopic()">
-                    <div class="topic-title">我有其他想说的</div>
+                <div class="topic-section-primary">
+                    <p class="topic-empty">暂时没有准备好话题，您也可以直接开聊</p>
+                    <div class="topic-option topic-option-free" onclick="selectFreeTopic()">
+                        <div class="topic-title">我有其他想说的</div>
+                    </div>
+                </div>
+                <div class="topic-divider-or">
+                    <span>或者</span>
+                </div>
+                <div class="topic-section-secondary">
+                    <div class="topic-narration-link" onclick="selectNarrationMode()">
+                        <span class="topic-narration-title">自述模式</span>
+                        <span class="topic-narration-desc">不需要引导，自由讲述您的故事</span>
+                    </div>
                 </div>
             `;
             return;
@@ -254,9 +265,7 @@ function escapeHtml(text) {
 function renderTopicOptions(options, hasMore, isRefreshing) {
     const container = document.getElementById('topicOptions');
     const refreshDisabled = isRefreshing || !hasMore;
-    const refreshLabel = isRefreshing ? '正在换一批...' : (hasMore ? '换一批' : '先看看这些');
-    const refreshClass = isRefreshing ? 'btn topic-refresh-btn is-refreshing' : 'btn topic-refresh-btn';
-    const narrationClass = 'btn topic-refresh-btn topic-narration-btn';
+    const refreshLabel = isRefreshing ? '换一批...' : (hasMore ? '换一批' : '暂时没有更多了');
     const refreshIcon = `
         <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20 5v6h-6"></path>
@@ -264,22 +273,31 @@ function renderTopicOptions(options, hasMore, isRefreshing) {
         </svg>
     `;
 
-    container.innerHTML = options.map((opt, index) => `
-        <div class="topic-option" onclick="selectTopicByIndex(${index})">
-            <div class="topic-title">${escapeHtml(opt.topic)}</div>
+    container.innerHTML = `
+        <div class="topic-section-primary">
+            ${options.map((opt, index) => `
+                <div class="topic-option" onclick="selectTopicByIndex(${index})">
+                    <div class="topic-title">${escapeHtml(opt.topic)}</div>
+                </div>
+            `).join('')}
+            <div class="topic-option topic-option-free" onclick="selectFreeTopic()">
+                <div class="topic-title">我有其他想说的</div>
+            </div>
+            <div class="topic-refresh-row">
+                <button class="topic-refresh-link ${isRefreshing ? 'is-refreshing' : ''}" onclick="loadTopicOptions()" ${refreshDisabled ? 'disabled' : ''}>
+                    ${refreshIcon}
+                    <span>${refreshLabel}</span>
+                </button>
+            </div>
         </div>
-    `).join('') + `
-        <div class="topic-option topic-option-free" onclick="selectFreeTopic()">
-            <div class="topic-title">我有其他想说的</div>
+        <div class="topic-divider-or">
+            <span>或者</span>
         </div>
-        <div class="topic-actions">
-            <button class="${narrationClass}" onclick="selectNarrationMode()">
-                <span>自述模式</span>
-            </button>
-            <button class="${refreshClass}" onclick="loadTopicOptions()" ${refreshDisabled ? 'disabled' : ''}>
-                ${refreshIcon}
-                <span>${refreshLabel}</span>
-            </button>
+        <div class="topic-section-secondary">
+            <div class="topic-narration-link" onclick="selectNarrationMode()">
+                <span class="topic-narration-title">自述模式</span>
+                <span class="topic-narration-desc">不需要引导，自由讲述您的故事</span>
+            </div>
         </div>
     `;
 }
